@@ -881,12 +881,6 @@ void VarManager::FillTrack(T const& track, float* values)
     if (fgUsedVars[kInvPt]) {
       values[kInvPt] = 1. / track.pt();
     }
-    if (fgUsedVars[kPtResolution]) {
-      if (track.has_reducedMCTrack()) {
-        auto remctrack = track.reducedMCTrack();
-        values[kPtResolution] = (track.pt() - remctrack.pt()) / remctrack.pt();
-      }
-    }
     values[kEta] = track.eta();
     values[kPhi] = track.phi();
     values[kCharge] = track.sign();
@@ -1192,6 +1186,13 @@ void VarManager::FillTrack(T const& track, float* values)
     values[kRap] = vpair.Rapidity();
   }
 
+  // Quantities based on the MC table
+  if constexpr ((fillMap & ParticleMC) > 0) {
+    if (track.has_reducedMCTrack()) {
+      auto remctrack = track.reducedMCTrack();
+      values[kPtResolution] = (track.pt() - remctrack.pt()) / remctrack.pt();
+    }
+  }
   // Derived quantities which can be computed based on already filled variables
   FillTrackDerived(values);
 }
