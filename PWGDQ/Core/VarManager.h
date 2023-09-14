@@ -205,6 +205,7 @@ class VarManager : public TObject
     kNBasicTrackVariables,
     kUsedKF,
     kKFMass,
+    kPtResolution,
 
     // Barrel track variables
     kPin,
@@ -319,7 +320,6 @@ class VarManager : public TObject
     kMCPhi,
     kMCEta,
     kMCY,
-    kMCPtResolution,
     kMCParticleGeneratorId,
     kNMCParticleVariables,
 
@@ -521,8 +521,6 @@ class VarManager : public TObject
   static void FillTrack(T const& track, float* values = nullptr);
   template <typename U, typename T>
   static void FillTrackMC(const U& mcStack, T const& track, float* values = nullptr);
-  template <typename U, typename T>
-  static void FillTrackwithMC(const U& mcStack, T const& track, float* values = nullptr);
   template <int pairType, uint32_t fillMap, typename T1, typename T2>
   static void FillPair(T1 const& t1, T2 const& t2, float* values = nullptr);
   template <int pairType, typename T1, typename T2>
@@ -883,6 +881,12 @@ void VarManager::FillTrack(T const& track, float* values)
     if (fgUsedVars[kInvPt]) {
       values[kInvPt] = 1. / track.pt();
     }
+    if (fgUsedVars[kPtResolution]) {
+      if (track.has_reducedMCTrack()) {
+        auto remctrack = track.reducedMCTrack();
+        values[kPtResolution] = (track.pt() - remctrack.pt()) / remctrack.pt();
+      }
+    }
     values[kEta] = track.eta();
     values[kPhi] = track.phi();
     values[kCharge] = track.sign();
@@ -1223,40 +1227,6 @@ void VarManager::FillTrackMC(const U& mcStack, T const& track, float* values)
     values[kMCPtResolution] = (remctrack.pt() - track.pt())/track.pt();
   }
 
-  FillTrackDerived(values);
-}
-
-template <typename U, typename T>
-void VarManager::FillTrackwithMC(const U& mcStack, T const& track, float* values)
-{
-  if (!values) {
-    values = fgValues;
-  }
- 
-  if (track.has_reducedMCTrack()) {
-    auto remctrack = track.reducedMCTrack();
-    values[kMCPtResolution] = (track.pt() - remctrack.pt())/remctrack.pt();
-
-    // Quantities based on the mc particle table
-    values[kMCPdgCode] = remctrack.pdgCode();
-    values[kMCParticleWeight] = remctrack.weight();
-    values[kMCPx] = remctrack.px();
-    values[kMCPy] = remctrack.py();
-    values[kMCPz] = remctrack.pz();
-    values[kMCE] = remctrack.e();
-    values[kMCVx] = remctrack.vx();
-    values[kMCVy] = remctrack.vy();
-    values[kMCVz] = remctrack.vz();
-    values[kMCPt] = remctrack.pt();
-    values[kMCPhi] = remctrack.phi();
-    values[kMCEta] = remctrack.eta();
-    values[kMCY] = remctrack.y();
-    values[kMCParticleGeneratorId] = remctrack.producedByGenerator();
-    if (remctrack.has_mothers()) {
-      auto mother = remctrack.template mothers_first_as<U>();
-      values[kMCMotherPdgCode] = mother.pdgCode();
-    }
-  }
   FillTrackDerived(values);
 }
  
