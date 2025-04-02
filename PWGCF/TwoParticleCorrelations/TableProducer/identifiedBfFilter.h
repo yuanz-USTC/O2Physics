@@ -9,6 +9,10 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
+/// \file identifiedBfFilter.h
+/// \brief Filters collisions and tracks according to selection criteria
+/// \author bghanley1995@gmail.com
+
 #ifndef PWGCF_TWOPARTICLECORRELATIONS_TABLEPRODUCER_IDENTIFIEDBFFILTER_H_
 #define PWGCF_TWOPARTICLECORRELATIONS_TABLEPRODUCER_IDENTIFIEDBFFILTER_H_
 
@@ -19,6 +23,8 @@
 
 #include "Framework/AnalysisTask.h"
 #include "Framework/AnalysisDataModel.h"
+#include "Framework/runDataProcessing.h"
+#include "Framework/O2DatabasePDGPlugin.h"
 #include "Common/DataModel/EventSelection.h"
 #include "Common/DataModel/Multiplicity.h"
 #include "Common/DataModel/Centrality.h"
@@ -26,16 +32,17 @@
 #include "Common/Core/TrackSelection.h"
 #include "Common/Core/TrackSelectionDefaults.h"
 #include "PWGCF/Core/AnalysisConfigurableCuts.h"
-#include <TDatabasePDG.h>
+#include "MathUtils/Utils.h"
 
 namespace o2
+
 {
 namespace aod
 {
 using CollisionsEvSelCent = soa::Join<aod::Collisions, aod::Mults, aod::EvSels, aod::CentFV0As, aod::CentFT0Ms, aod::CentFT0As, aod::CentFT0Cs, aod::CentNTPVs>;
 using CollisionEvSelCent = soa::Join<aod::Collisions, aod::Mults, aod::EvSels, aod::CentFV0As, aod::CentFT0Ms, aod::CentFT0As, aod::CentFT0Cs, aod::CentNTPVs>::iterator;
-using CollisionsEvSelRun2Cent = soa::Join<aod::Collisions, aod::Mults, aod::EvSels, aod::CentRun2V0Ms, aod::CentRun2CL0s, aod::CentRun2CL1s>;
-using CollisionEvSelRun2Cent = soa::Join<aod::Collisions, aod::Mults, aod::EvSels, aod::CentRun2V0Ms, aod::CentRun2CL0s, aod::CentRun2CL1s>::iterator;
+using CollisionsEvSelRun2Cent = soa::Join<aod::Collisions, aod::Mults, aod::EvSels, aod::CentRun2V0Ms>;
+using CollisionEvSelRun2Cent = soa::Join<aod::Collisions, aod::Mults, aod::EvSels, aod::CentRun2V0Ms>::iterator;
 using CollisionsEvSel = soa::Join<aod::Collisions, aod::Mults, aod::EvSels>;
 using CollisionEvSel = soa::Join<aod::Collisions, aod::Mults, aod::EvSels>::iterator;
 using TrackData = soa::Join<aod::Tracks, aod::TracksCov, aod::TracksExtra, aod::TracksDCA, aod::TrackSelection>::iterator;
@@ -44,6 +51,8 @@ namespace analysis
 {
 namespace identifiedbffilter
 {
+
+const std::vector<int> pdgcodes = {11, 211, 321, 2212};
 
 /// \enum MatchRecoGenSpecies
 /// \brief The species considered by the matching test
@@ -77,9 +86,9 @@ enum SpeciesPairMatch {
   kIdBfProtonProton      ///< Proton-Proton
 };
 
-const char* speciesName[kIdBfNoOfSpecies] = {"e", "pi", "ka", "p"};
+const char* speciesName[kIdBfNoOfSpecies + 1] = {"e", "pi", "ka", "p", "ha"};
 
-const char* speciesTitle[kIdBfNoOfSpecies] = {"e", "#pi", "K", "p"};
+const char* speciesTitle[kIdBfNoOfSpecies + 1] = {"e", "#pi", "K", "p", "ha"};
 
 const int speciesChargeValue1[kIdBfNoOfSpecies] = {
   0, //< electron
@@ -127,6 +136,8 @@ enum CentMultEstimatorType {
   kNTPV,               ///< NTPV centrality/multiplicity estimator Run 3
   knCentMultEstimators ///< number of centrality/mutiplicity estimator
 };
+
+float overallminp = 0.0f;
 
 /// \enum TriggerSelectionType
 /// \brief The type of trigger to apply for event selection
@@ -226,8 +237,6 @@ bool useOwnParticleSelection = false;
 float particleMaxDCAxy = 999.9f;
 float particleMaxDCAZ = 999.9f;
 bool traceCollId0 = false;
-
-TDatabasePDG* fPDG = nullptr;
 
 inline TriggerSelectionType getTriggerSelection(std::string const& triggstr)
 {
@@ -519,38 +528,60 @@ inline float extractMultiplicity(CollisionObject const& collision, CentMultEstim
 //////////////////////////////////////////////////////////////////////////////////
 /// \brief Centrality/multiplicity percentile
 template <typename CollisionObject>
-  requires(o2::aod::HasRun2Centrality<CollisionObject>)
 float getCentMultPercentile(CollisionObject collision)
 {
-  switch (fCentMultEstimator) {
-    case kV0M:
-      return collision.centRun2V0M();
-    case kCL0:
-      return collision.centRun2CL0();
-    case kCL1:
-      return collision.centRun2CL1();
-    default:
-      return 105.0;
-  }
-}
+  if constexpr (framework::has_type_v<aod::cent::CentRun2V0M, typename CollisionObject::all_columns> ||
+                framework::has_type_v<aod::cent::CentRun2CL0, typename CollisionObject::all_columns> ||
+                framework::has_type_v<aod::cent::CentRun2CL1, typename CollisionObject::all_columns>) {
+    switch (fCentMultEstimator) {
+      case kV0M:
+        return collision.centRun2V0M();
+        break;
+      case kCL0:
+        if constexpr (framework::has_type_v<aod::cent::CentRun2CL0, typename CollisionObject::all_columns>) {
+          return collision.centRun2CL0();
+        } else {
+          return 105.0;
+        }
+        break;
 
-template <typename CollisionObject>
-  requires(o2::aod::HasCentrality<CollisionObject>)
-float getCentMultPercentile(CollisionObject collision)
-{
-  switch (fCentMultEstimator) {
-    case kFV0A:
-      return collision.centFV0A();
-    case kFT0M:
-      return collision.centFT0M();
-    case kFT0A:
-      return collision.centFT0A();
-    case kFT0C:
-      return collision.centFT0C();
-    case kNTPV:
-      return collision.centNTPV();
-    default:
-      return 105.0;
+      case kCL1:
+        if constexpr (framework::has_type_v<aod::cent::CentRun2CL1, typename CollisionObject::all_columns>) {
+          return collision.centRun2CL1();
+        } else {
+          return 105.0;
+        }
+        break;
+      default:
+        return 105.0;
+        break;
+    }
+  }
+  if constexpr (framework::has_type_v<aod::cent::CentFV0A, typename CollisionObject::all_columns> ||
+                framework::has_type_v<aod::cent::CentFT0M, typename CollisionObject::all_columns> ||
+                framework::has_type_v<aod::cent::CentFT0A, typename CollisionObject::all_columns> ||
+                framework::has_type_v<aod::cent::CentFT0C, typename CollisionObject::all_columns> ||
+                framework::has_type_v<aod::cent::CentNTPV, typename CollisionObject::all_columns>) {
+    switch (fCentMultEstimator) {
+      case kFV0A:
+        return collision.centFV0A();
+        break;
+      case kFT0M:
+        return collision.centFT0M();
+        break;
+      case kFT0A:
+        return collision.centFT0A();
+        break;
+      case kFT0C:
+        return collision.centFT0C();
+        break;
+      case kNTPV:
+        return collision.centNTPV();
+        break;
+      default:
+        return 105.0;
+        break;
+    }
   }
 }
 
@@ -653,7 +684,7 @@ inline bool centralitySelection<aod::McCollision>(aod::McCollision const&, float
 //////////////////////////////////////////////////////////////////////////////////
 
 template <typename CollisionObject>
-inline bool IsEvtSelected(CollisionObject const& collision, float& centormult)
+inline bool isEvtSelected(CollisionObject const& collision, float& centormult)
 {
   bool trigsel = triggerSelection(collision);
 
@@ -664,6 +695,7 @@ inline bool IsEvtSelected(CollisionObject const& collision, float& centormult)
   }
 
   bool centmultsel = centralitySelection(collision, centormult);
+
   return trigsel && zvtxsel && centmultsel;
 }
 
@@ -677,7 +709,7 @@ inline bool matchTrackType(TrackObject const& track)
   if (useOwnTrackSelection) {
     return ownTrackSelection.IsSelected(track);
   } else {
-    for (auto filter : trackFilters) {
+    for (const auto& filter : trackFilters) {
       if (filter->IsSelected(track)) {
         if (dca2Dcut) {
           if (track.dcaXY() * track.dcaXY() / maxDCAxy / maxDCAxy + track.dcaZ() * track.dcaZ() / maxDCAz / maxDCAz > 1) {
@@ -705,7 +737,7 @@ inline bool matchTrackType(TrackObject const& track)
 template <typename ParticleObject, typename MCCollisionObject>
 void exploreMothers(ParticleObject& particle, MCCollisionObject& collision)
 {
-  for (auto& m : particle.template mothers_as<aod::McParticles>()) {
+  for (const auto& m : particle.template mothers_as<aod::McParticles>()) {
     LOGF(info, "   mother index: %d", m.globalIndex());
     LOGF(info, "   Tracking back mother");
     LOGF(info, "   assigned collision Id: %d, looping on collision Id: %d", m.mcCollisionId(), collision.globalIndex());
@@ -716,54 +748,10 @@ void exploreMothers(ParticleObject& particle, MCCollisionObject& collision)
   }
 }
 
-/// \brief Accepts or not the passed generated particle
-/// \param track the particle of interest
-/// \return the internal particle id, -1 if not accepted
-/// TODO: the PID implementation
-/// For the time being we keep the convention
-/// - positive particle pid even
-/// - negative particle pid odd
-/// - charged hadron 0/1
-template <typename ParticleObject, typename MCCollisionObject>
-inline int8_t AcceptParticle(ParticleObject& particle, MCCollisionObject const& collision)
+inline float getCharge(float pdgCharge)
 {
-  float charge = (fPDG->GetParticle(particle.pdgCode())->Charge() / 3 >= 1) ? 1.0 : ((fPDG->GetParticle(particle.pdgCode())->Charge() / 3 <= -1) ? -1.0 : 0.0);
-
-  if (particle.isPhysicalPrimary()) {
-    if ((particle.mcCollisionId() == 0) && traceCollId0) {
-      LOGF(info, "Particle %d passed isPhysicalPrimary", particle.globalIndex());
-    }
-    if (useOwnParticleSelection) {
-      float dcaxy = TMath::Sqrt((particle.vx() - collision.posX()) * (particle.vx() - collision.posX()) +
-                                (particle.vy() - collision.posY()) * (particle.vy() - collision.posY()));
-      float dcaz = TMath::Abs(particle.vz() - collision.posZ());
-      if (!((dcaxy < particleMaxDCAxy) && (dcaz < particleMaxDCAZ))) {
-        if ((particle.mcCollisionId() == 0) && traceCollId0) {
-          LOGF(info, "Rejecting particle with dcaxy: %.2f and dcaz: %.2f", dcaxy, dcaz);
-          LOGF(info, "   assigned collision Id: %d, looping on collision Id: %d", particle.mcCollisionId(), collision.globalIndex());
-          LOGF(info, "   Collision x: %.5f, y: %.5f, z: %.5f", collision.posX(), collision.posY(), collision.posZ());
-          LOGF(info, "   Particle x: %.5f, y: %.5f, z: %.5f", particle.vx(), particle.vy(), particle.vz());
-          LOGF(info, "   index: %d, pdg code: %d", particle.globalIndex(), particle.pdgCode());
-
-          exploreMothers(particle, collision);
-        }
-        return -1;
-      }
-    }
-    if (ptlow < particle.pt() && particle.pt() < ptup && etalow < particle.eta() && particle.eta() < etaup) {
-      if (charge > 0) {
-        return 0;
-      }
-      if (charge < 0) {
-        return 1;
-      }
-    }
-  } else {
-    if ((particle.mcCollisionId() == 0) && traceCollId0) {
-      LOGF(info, "Particle %d NOT passed isPhysicalPrimary", particle.globalIndex());
-    }
-  }
-  return -1;
+  float charge = (pdgCharge / 3 >= 1) ? 1.0 : ((pdgCharge / 3 <= -1) ? -1.0 : 0);
+  return charge;
 }
 
 } // namespace identifiedbffilter

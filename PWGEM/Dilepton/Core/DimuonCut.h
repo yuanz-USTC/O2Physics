@@ -79,7 +79,7 @@ class DimuonCut : public TNamed
     return true;
   }
 
-  template <typename TTrack1, typename TTrack2>
+  template <bool dont_require_rapidity = false, typename TTrack1, typename TTrack2>
   bool IsSelectedPair(TTrack1 const& t1, TTrack2 const& t2) const
   {
     ROOT::Math::PtEtaPhiMVector v1(t1.pt(), t1.eta(), t1.phi(), o2::constants::physics::MassMuon);
@@ -94,11 +94,7 @@ class DimuonCut : public TNamed
       return false;
     }
 
-    if (v12.Pt() < mMinPairPt || mMaxPairPt < v12.Pt()) {
-      return false;
-    }
-
-    if (v12.Rapidity() < mMinPairY || mMaxPairY < v12.Rapidity()) {
+    if (!dont_require_rapidity && (v12.Rapidity() < mMinPairY || mMaxPairY < v12.Rapidity())) {
       return false;
     }
 
@@ -116,17 +112,20 @@ class DimuonCut : public TNamed
     return true;
   }
 
-  template <typename TTrack>
+  template <bool dont_require_pteta = false, typename TTrack>
   bool IsSelectedTrack(TTrack const& track) const
   {
     if (!IsSelectedTrack(track, DimuonCuts::kTrackType)) {
       return false;
     }
-    if (!IsSelectedTrack(track, DimuonCuts::kTrackPtRange)) {
-      return false;
-    }
-    if (!IsSelectedTrack(track, DimuonCuts::kTrackEtaRange)) {
-      return false;
+
+    if (!dont_require_pteta) {
+      if (!IsSelectedTrack(track, DimuonCuts::kTrackPtRange)) {
+        return false;
+      }
+      if (!IsSelectedTrack(track, DimuonCuts::kTrackEtaRange)) {
+        return false;
+      }
     }
     if (!IsSelectedTrack(track, DimuonCuts::kTrackPhiRange)) {
       return false;
