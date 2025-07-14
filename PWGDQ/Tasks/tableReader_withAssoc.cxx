@@ -1192,6 +1192,7 @@ struct AnalysisSameEventPairing {
   Produces<aod::DileptonFlow> dileptonFlowList;
   Produces<aod::DileptonsInfo> dileptonInfoList;
   Produces<aod::JPsieeCandidates> PromptNonPromptSepTable;
+  Produces<aod::DieleAssocs> dieleAssocList;
 
   o2::base::MatLayerCylSet* fLUT = nullptr;
   int fCurrentRun; // needed to detect if the run changed and trigger update of calibrations etc.
@@ -1247,7 +1248,8 @@ struct AnalysisSameEventPairing {
   std::vector<AnalysisCompositeCut> fPairCuts;
   std::vector<TString> fTrackCuts;
   std::map<std::pair<uint32_t, uint32_t>, uint32_t> fAmbiguousPairs;
-
+  std::vector<std::pair<uint32_t, uint32_t>> fAmbiguousPairsVec; // vector of pairs to be used in the histograms
+  uint32_t fAmbiguousPairIndex = 0; // index of the ambiguous pair in the vector
   uint32_t fTrackFilterMask; // mask for the track cuts required in this task to be applied on the barrel cuts produced upstream
   uint32_t fMuonFilterMask;  // mask for the muon cuts required in this task to be applied on the muon cuts produced upstream
   int fNCutsBarrel;
@@ -1599,9 +1601,12 @@ struct AnalysisSameEventPairing {
     dileptonFlowList.reserve(1);
     if (fConfigOptions.flatTables.value) {
       dielectronAllList.reserve(1);
+      dieleAssocList.reserve(1);
       dimuonAllList.reserve(1);
     }
     fAmbiguousPairs.clear();
+    fAmbiguousPairsVec.clear();
+    fAmbiguousPairIndex = 0;
     constexpr bool eventHasQvector = ((TEventFillMap & VarManager::ObjTypes::ReducedEventQvector) > 0);
     constexpr bool eventHasQvectorCentr = ((TEventFillMap & VarManager::ObjTypes::CollisionQvect) > 0);
     constexpr bool trackHasCov = ((TTrackFillMap & VarManager::ObjTypes::TrackCov) > 0 || (TTrackFillMap & VarManager::ObjTypes::ReducedTrackBarrelCov) > 0);
@@ -1809,20 +1814,63 @@ struct AnalysisSameEventPairing {
             isUnambiguous = !(isAmbiInBunch || isAmbiOutOfBunch);
             isLeg1Ambi = (twoTrackFilter & (static_cast<uint32_t>(1) << 28) || (twoTrackFilter & (static_cast<uint32_t>(1) << 30)));
             isLeg2Ambi = (twoTrackFilter & (static_cast<uint32_t>(1) << 29) || (twoTrackFilter & (static_cast<uint32_t>(1) << 31)));
+            uint32_t ambiId_temp = 0;
             if constexpr (TPairType == VarManager::kDecayToEE) {
               if (isLeg1Ambi && isLeg2Ambi) {
                 std::pair<uint32_t, uint32_t> iPair(a1.reducedtrackId(), a2.reducedtrackId());
                 if (fAmbiguousPairs.find(iPair) != fAmbiguousPairs.end()) {
                   if (fAmbiguousPairs[iPair] & (static_cast<uint32_t>(1) << icut)) { // if this pair is already stored with this cut
                     isAmbiExtra = true;
+
+                    if (icut == 0) { // if this is the first cut, we store the pair in the vector
+                      auto it = std::find(fAmbiguousPairsVec.begin(), fAmbiguousPairsVec.end(), iPair);
+                      if (it != fAmbiguousPairsVec.end()) {
+                        ambiId_temp = std::distance(fAmbiguousPairsVec.begin(), it) + 1; // store the index of the pair in the vector (1-based index)
+                      }
+                      else {
+                        ambiId_temp = 999; // if not found, we set it to a large number
+                      }
+                    } else {
+                      ambiId_temp = 999; // if not the first cut, we set it to a large number
+                    }
+
                   } else {
                     fAmbiguousPairs[iPair] |= static_cast<uint32_t>(1) << icut;
+
+                    ambiId_temp = 999;
                   }
                 } else {
                   fAmbiguousPairs[iPair] = static_cast<uint32_t>(1) << icut;
+
+                  if (icut == 0) { // if this is the first cut, we store the pair in the vector
+                    fAmbiguousPairsVec.push_back(iPair);
+                    ambiId_temp = ++fAmbiguousPairIndex; // store the index of the pair in the vector (1-based index)
+                  } else {
+                    ambiId_temp = 999; // if not the first cut, we set it to a large number
+                  }
                 }
               }
             }
+
+            if constexpr (TPairType == VarManager::kDecayToEE) {
+              if (icut == 0 && fConfigOptions.flatTables.value) { // if this is the first cut, we store the pair in the vector
+                auto t1 = a1.template reducedtrack_as<TTracks>();
+                auto t2 = a2.template reducedtrack_as<TTracks>();
+                float track1_assoc[VarManager::kNVars];
+                float track2_assoc[VarManager::kNVars];
+                VarManager::FillTrackCollision<TTrackFillMap>(t1, event, track1_assoc);
+                VarManager::FillTrackCollision<TTrackFillMap>(t2, event, track2_assoc);
+
+                dieleAssocList(event.globalIndex(),
+                              1, isAmbiExtra? ambiId_temp : 0, 1,
+                              VarManager::fgValues[VarManager::kMass], VarManager::fgValues[VarManager::kPt], VarManager::fgValues[VarManager::kEta], VarManager::fgValues[VarManager::kPhi], t1.sign() + t2.sign(),
+                              t1.pt(), t1.eta(), t1.phi(), t1.itsClusterMap(), t1.itsChi2NCl(), t1.tpcNClsFound(), t1.tpcChi2NCl(), track1_assoc[VarManager::kTrackDCAxy], track1_assoc[VarManager::kTrackDCAz], t1.tpcSignal(), t1.tpcNSigmaEl(), t1.tpcNSigmaPi(), t1.tpcNSigmaPr(),
+                              t2.pt(), t2.eta(), t2.phi(), t2.itsClusterMap(), t2.itsChi2NCl(), t2.tpcNClsFound(), t2.tpcChi2NCl(), track2_assoc[VarManager::kTrackDCAxy], track2_assoc[VarManager::kTrackDCAz], t2.tpcSignal(), t2.tpcNSigmaEl(), t2.tpcNSigmaPi(), t2.tpcNSigmaPr(),
+                              VarManager::fgValues[VarManager::kVertexingTauxy], VarManager::fgValues[VarManager::kVertexingTauxyErr], VarManager::fgValues[VarManager::kVertexingTauz], VarManager::fgValues[VarManager::kVertexingTauzErr],
+                              VarManager::fgValues[VarManager::kVertexingLxy], VarManager::fgValues[VarManager::kVertexingLxyErr], VarManager::fgValues[VarManager::kVertexingLz], VarManager::fgValues[VarManager::kVertexingLzErr]);
+              }
+            }
+
             if (sign1 * sign2 < 0) {
               PromptNonPromptSepTable(VarManager::fgValues[VarManager::kMass], VarManager::fgValues[VarManager::kPt], VarManager::fgValues[VarManager::kVertexingTauxyProjected], VarManager::fgValues[VarManager::kVertexingTauxyProjectedPoleJPsiMass], VarManager::fgValues[VarManager::kVertexingTauzProjected], isAmbiInBunch, isAmbiOutOfBunch);
               if constexpr (TPairType == VarManager::kDecayToMuMu) {
