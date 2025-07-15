@@ -698,6 +698,8 @@ DECLARE_SOA_COLUMN(Tauxy, tauxy, float);                                        
 DECLARE_SOA_COLUMN(TauxyErr, tauxyErr, float);                                           //! Error on transverse pseudo-proper time of lepton pair (in ns)
 DECLARE_SOA_COLUMN(Lz, lz, float);                                                       //! Longitudinal projection of decay length
 DECLARE_SOA_COLUMN(Lxy, lxy, float);                                                     //! Transverse projection of decay length
+DECLARE_SOA_COLUMN(LxyErr, lxyErr, float);                                               //! Error on transverse projection of decay length
+DECLARE_SOA_COLUMN(LzErr, lzErr, float);                                                 //! Error on longitudinal projection of decay length
 DECLARE_SOA_COLUMN(Chi2pca, chi2pca, float);                                             //! Chi2 for PCA of the dilepton
 DECLARE_SOA_COLUMN(CosPointingAngle, cosPointingAngle, float);                           //! Cosine of the pointing angle
 DECLARE_SOA_COLUMN(U2Q2, u2q2, float);                                                   //! Scalar product between unitary vector with event flow vector (harmonic 2)
@@ -738,6 +740,8 @@ DECLARE_SOA_COLUMN(PairDCAxyz, pairDCAxyz, float);                              
 DECLARE_SOA_COLUMN(PairDCAxy, pairDCAxy, float);                                         //! Pair DCAxy to PV from KFParticle
 DECLARE_SOA_COLUMN(DeviationPairKF, deviationPairKF, float);                             //! Pair chi2 deviation to PV from KFParticle
 DECLARE_SOA_COLUMN(DeviationxyPairKF, deviationxyPairKF, float);                         //! Pair chi2 deviation to PV in XY from KFParticle
+DECLARE_SOA_COLUMN(Ambiguity, ambiguity, uint32_t);                                      //! Ambiguity flag for the pair
+DECLARE_SOA_COLUMN(IsCorrectAssoc, isCorrectAssoc, bool); //! Flag for correct association of the pair
 // DECLARE_SOA_INDEX_COLUMN(ReducedMuon, reducedmuon2); //!
 DECLARE_SOA_COLUMN(CosThetaHE, costhetaHE, float);             //! Cosine in the helicity frame
 DECLARE_SOA_COLUMN(PhiHE, phiHe, float);                       //! Phi in the helicity frame
@@ -895,6 +899,15 @@ DECLARE_SOA_TABLE(DileptonsPolarization, "AOD", "RTDILPOLAR", //!
                   reducedpair::CosThetaRM,
                   reducedpair::CosThetaStarTPC, reducedpair::CosThetaStarFT0A, reducedpair::CosThetaStarFT0C);
 
+DECLARE_SOA_TABLE(DieleAssocs, "AOD", "RTDIELEASSOC", //!
+                  o2::soa::Index<>, collision::PosX, collision::PosY, collision::PosZ, collision::NumContrib,
+                  reducedpair::McDecision, reducedpair::Ambiguity, reducedpair::IsCorrectAssoc,
+                  reducedpair::Mass, reducedpair::Pt, reducedpair::Eta, reducedpair::Phi, reducedpair::Sign,
+                  dilepton_track_index::Pt1, dilepton_track_index::Eta1, dilepton_track_index::Phi1, dilepton_track_index::ITSClusterMap1, dilepton_track_index::ITSChi2NCl1, dilepton_track_index::TPCNClsFound1, dilepton_track_index::TPCChi2NCl1, dilepton_track_index::DcaXY1, dilepton_track_index::DcaZ1, dilepton_track_index::TPCSignal1, dilepton_track_index::TPCNSigmaEl1, dilepton_track_index::TPCNSigmaPi1, dilepton_track_index::TPCNSigmaPr1,
+                  dilepton_track_index::Pt2, dilepton_track_index::Eta2, dilepton_track_index::Phi2, dilepton_track_index::ITSClusterMap2, dilepton_track_index::ITSChi2NCl2, dilepton_track_index::TPCNClsFound2, dilepton_track_index::TPCChi2NCl2, dilepton_track_index::DcaXY2, dilepton_track_index::DcaZ2, dilepton_track_index::TPCSignal2, dilepton_track_index::TPCNSigmaEl2, dilepton_track_index::TPCNSigmaPi2, dilepton_track_index::TPCNSigmaPr2,
+                  reducedpair::Tauxy, reducedpair::TauxyErr, reducedpair::Tauz, reducedpair::TauzErr,
+                  reducedpair::Lxy, reducedpair::LxyErr, reducedpair::Lz, reducedpair::LzErr);
+
 using Dielectron = Dielectrons::iterator;
 using StoredDielectron = StoredDielectrons::iterator;
 using Dimuon = Dimuons::iterator;
@@ -909,6 +922,7 @@ using DileptonMiniTree = DileptonsMiniTree::iterator;
 using DileptonMiniTreeGen = DileptonsMiniTreeGen::iterator;
 using DileptonMiniTreeRec = DileptonsMiniTreeRec::iterator;
 using DileptonPolarization = DileptonsPolarization::iterator;
+using DieleAssoc = DieleAssocs::iterator;
 
 // Tables for using analysis-dilepton-track with analysis-asymmetric-pairing
 DECLARE_SOA_TABLE(Ditracks, "AOD", "RTDITRACK", //!

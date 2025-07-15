@@ -1253,6 +1253,7 @@ struct AnalysisSameEventPairing {
   Produces<aod::DileptonsMiniTreeRec> dileptonMiniTreeRec;
   Produces<aod::DileptonsInfo> dileptonInfoList;
   Produces<aod::JPsieeCandidates> PromptNonPromptSepTable;
+  Produces<aod::DieleAssocs> dieleAssocList;
 
   o2::base::MatLayerCylSet* fLUT = nullptr;
   int fCurrentRun; // needed to detect if the run changed and trigger update of calibrations etc.
@@ -1324,7 +1325,10 @@ struct AnalysisSameEventPairing {
   std::vector<MCSignal*> fGenMCSignals;
 
   std::vector<AnalysisCompositeCut> fPairCuts;
-
+  std::vector<TString> fTrackCuts;
+  std::map<std::pair<uint32_t, uint32_t>, uint32_t> fAmbiguousPairs;
+  std::vector<std::pair<uint32_t, uint32_t>> fAmbiguousPairsVec; // vector of pairs of indices of ambiguous pairs, used for the flat table
+  uint32_t fAmbiguousPairIndex = 0; // index of the ambiguous pair in the vector, used for the flat table
   uint32_t fTrackFilterMask; // mask for the track cuts required in this task to be applied on the barrel cuts produced upstream
   uint32_t fMuonFilterMask;  // mask for the muon cuts required in this task to be applied on the muon cuts produced upstream
   int fNCutsBarrel;
@@ -1363,6 +1367,7 @@ struct AnalysisSameEventPairing {
     //   and make a mask for active cuts (barrel and muon selection tasks may run more cuts, needed for other analyses)
     TString trackCutsStr = fConfigCuts.track.value;
     TObjArray* objArrayTrackCuts = nullptr;
+    fTrackCuts.clear();
     if (!trackCutsStr.IsNull()) {
       objArrayTrackCuts = trackCutsStr.Tokenize(",");
     }
@@ -1421,6 +1426,7 @@ struct AnalysisSameEventPairing {
         // if the current barrel selection cut is required in this task, then switch on the corresponding bit in the mask
         // and assign histogram directories
         if (objArrayTrackCuts->FindObject(tempStr.Data()) != nullptr) {
+          fTrackCuts.push_back(tempStr);
           fTrackFilterMask |= (static_cast<uint32_t>(1) << icut);
 
           if (fEnableBarrelHistos) {
@@ -1431,12 +1437,9 @@ struct AnalysisSameEventPairing {
               Form("PairsBarrelSEMM_%s", objArray->At(icut)->GetName())};
             if (fConfigQA) {
               // assign separate hist directories for ambiguous tracks
-              names.push_back(Form("PairsBarrelSEPM_ambiguousInBunch_%s", objArray->At(icut)->GetName()));
-              names.push_back(Form("PairsBarrelSEPP_ambiguousInBunch_%s", objArray->At(icut)->GetName()));
-              names.push_back(Form("PairsBarrelSEMM_ambiguousInBunch_%s", objArray->At(icut)->GetName()));
-              names.push_back(Form("PairsBarrelSEPM_ambiguousOutOfBunch_%s", objArray->At(icut)->GetName()));
-              names.push_back(Form("PairsBarrelSEPP_ambiguousOutOfBunch_%s", objArray->At(icut)->GetName()));
-              names.push_back(Form("PairsBarrelSEMM_ambiguousOutOfBunch_%s", objArray->At(icut)->GetName()));
+              names.push_back(Form("PairsBarrelSEPM_ambiguousextra_%s", objArray->At(icut)->GetName()));
+              names.push_back(Form("PairsBarrelSEPP_ambiguousextra_%s", objArray->At(icut)->GetName()));
+              names.push_back(Form("PairsBarrelSEMM_ambiguousextra_%s", objArray->At(icut)->GetName()));
             }
             for (auto& n : names) {
               histNames += Form("%s;", n.Data());
@@ -1472,10 +1475,9 @@ struct AnalysisSameEventPairing {
                 if (fConfigQA) {
                   names.push_back(Form("PairsBarrelSEPMCorrectAssoc_%s_%s", objArray->At(icut)->GetName(), sig->GetName()));
                   names.push_back(Form("PairsBarrelSEPMIncorrectAssoc_%s_%s", objArray->At(icut)->GetName(), sig->GetName()));
-                  names.push_back(Form("PairsBarrelSEPM_ambiguousInBunch_%s_%s", objArray->At(icut)->GetName(), sig->GetName()));
+                  names.push_back(Form("PairsBarrelSEPM_ambiguousextra_%s_%s", objArray->At(icut)->GetName(), sig->GetName()));
                   names.push_back(Form("PairsBarrelSEPM_ambiguousInBunchCorrectAssoc_%s_%s", objArray->At(icut)->GetName(), sig->GetName()));
                   names.push_back(Form("PairsBarrelSEPM_ambiguousInBunchIncorrectAssoc_%s_%s", objArray->At(icut)->GetName(), sig->GetName()));
-                  names.push_back(Form("PairsBarrelSEPM_ambiguousOutOfBunch_%s_%s", objArray->At(icut)->GetName(), sig->GetName()));
                   names.push_back(Form("PairsBarrelSEPM_ambiguousOutOfBunchCorrectAssoc_%s_%s", objArray->At(icut)->GetName(), sig->GetName()));
                   names.push_back(Form("PairsBarrelSEPM_ambiguousOutOfBunchIncorrectAssoc_%s_%s", objArray->At(icut)->GetName(), sig->GetName()));
                 }
@@ -1710,6 +1712,7 @@ struct AnalysisSameEventPairing {
     dimuonsExtraList.reserve(1);
     dielectronInfoList.reserve(1);
     dileptonInfoList.reserve(1);
+    dieleAssocList.reserve(1);
     if (fConfigOptions.flatTables.value) {
       dimuonAllList.reserve(1);
     }
@@ -1720,6 +1723,9 @@ struct AnalysisSameEventPairing {
     constexpr bool eventHasQvector = ((TEventFillMap & VarManager::ObjTypes::ReducedEventQvector) > 0);
     constexpr bool trackHasCov = ((TTrackFillMap & VarManager::ObjTypes::ReducedTrackBarrelCov) > 0);
 
+    fAmbiguousPairs.clear(); // reset the map of ambiguous pairs
+    fAmbiguousPairsVec.clear(); // reset the vector of ambiguous pairs
+    fAmbiguousPairIndex = 0; // reset the index of the ambiguous pair in the vector
     for (auto& event : events) {
       if (!event.isEventSelected_bit(0)) {
         continue;
@@ -1903,6 +1909,9 @@ struct AnalysisSameEventPairing {
         bool isAmbiInBunch = false;
         bool isAmbiOutOfBunch = false;
         bool isCorrect_pair = false;
+        bool isLeg1Ambi = false;
+        bool isLeg2Ambi = false;
+        bool isAmbiExtra = false;
         if (isCorrectAssoc_leg1 && isCorrectAssoc_leg2)
           isCorrect_pair = true;
 
@@ -1910,6 +1919,64 @@ struct AnalysisSameEventPairing {
           if (twoTrackFilter & (static_cast<uint32_t>(1) << icut)) {
             isAmbiInBunch = (twoTrackFilter & (static_cast<uint32_t>(1) << 28)) || (twoTrackFilter & (static_cast<uint32_t>(1) << 29));
             isAmbiOutOfBunch = (twoTrackFilter & (static_cast<uint32_t>(1) << 30)) || (twoTrackFilter & (static_cast<uint32_t>(1) << 31));
+            isLeg1Ambi = (twoTrackFilter & (static_cast<uint32_t>(1) << 28) || (twoTrackFilter & (static_cast<uint32_t>(1) << 30)));
+            isLeg2Ambi = (twoTrackFilter & (static_cast<uint32_t>(1) << 29) || (twoTrackFilter & (static_cast<uint32_t>(1) << 31)));
+            uint32_t ambiId_temp = 0;
+            if constexpr (TPairType == VarManager::kDecayToEE) {
+              if (isLeg1Ambi && isLeg2Ambi) {
+                std::pair<uint32_t, uint32_t> iPair(a1.reducedtrackId(), a2.reducedtrackId());
+                if (fAmbiguousPairs.find(iPair) != fAmbiguousPairs.end()) {
+                  if (fAmbiguousPairs[iPair] & (static_cast<uint32_t>(1) << icut)) { // if this pair is already stored with this cut
+                    isAmbiExtra = true;
+
+                    if(icut==0) {
+                      auto it = std::find(fAmbiguousPairsVec.begin(), fAmbiguousPairsVec.end(), iPair);
+                      if (it != fAmbiguousPairsVec.end()) {
+                        ambiId_temp = std::distance(fAmbiguousPairsVec.begin(), it) + 1; // ambiId_temp is the index of the pair in the vector, +1 because index starts from 0
+                      } else {
+                        ambiId_temp = 999; // should not happen, but just in case
+                      }
+                    } else {
+                      ambiId_temp = 999; // should not happen, but just in case
+                    }
+                  } else {
+                    fAmbiguousPairs[iPair] |= static_cast<uint32_t>(1) << icut;
+
+                    ambiId_temp = 999; // should not happen, but just in case
+                  }
+                } else {
+                  fAmbiguousPairs[iPair] = static_cast<uint32_t>(1) << icut;
+
+                  if (icut == 0) { // if this is the first cut, store the pair in the vector
+                    fAmbiguousPairsVec.push_back(iPair);
+                    ambiId_temp = ++fAmbiguousPairIndex; // increment the index and store it
+                  } else {
+                    ambiId_temp = 999; // should not happen, but just in case
+                  }
+                }
+              }
+            }
+
+            if constexpr (TPairType == VarManager::kDecayToEE) {
+              if (icut == 0 && mcDecision) {
+                auto t1 = a1.template reducedtrack_as<TTracks>();
+                auto t2 = a2.template reducedtrack_as<TTracks>();
+                float track1_assoc[VarManager::kNVars];
+                float track2_assoc[VarManager::kNVars];
+                VarManager::FillTrackCollision<TTrackFillMap>(t1, event, track1_assoc);
+                VarManager::FillTrackCollision<TTrackFillMap>(t2, event, track2_assoc);
+
+                dieleAssocList(event.posX(), event.posY(), event.posZ(), event.numContrib(),
+                              mcDecision, isAmbiExtra? ambiId_temp : 0, isCorrect_pair,
+                              VarManager::fgValues[VarManager::kMass], VarManager::fgValues[VarManager::kPt], VarManager::fgValues[VarManager::kEta], VarManager::fgValues[VarManager::kPhi], t1.sign() + t2.sign(),
+                              t1.pt(), t1.eta(), t1.phi(), t1.itsClusterMap(), t1.itsChi2NCl(), t1.tpcNClsFound(), t1.tpcChi2NCl(), track1_assoc[VarManager::kTrackDCAxy], track1_assoc[VarManager::kTrackDCAz], t1.tpcSignal(), t1.tpcNSigmaEl(), t1.tpcNSigmaPi(), t1.tpcNSigmaPr(),
+                              t2.pt(), t2.eta(), t2.phi(), t2.itsClusterMap(), t2.itsChi2NCl(), t2.tpcNClsFound(), t2.tpcChi2NCl(), track2_assoc[VarManager::kTrackDCAxy], track2_assoc[VarManager::kTrackDCAz], t2.tpcSignal(), t2.tpcNSigmaEl(), t2.tpcNSigmaPi(), t2.tpcNSigmaPr(),
+                              VarManager::fgValues[VarManager::kVertexingTauxy], VarManager::fgValues[VarManager::kVertexingTauxyErr], VarManager::fgValues[VarManager::kVertexingTauz], VarManager::fgValues[VarManager::kVertexingTauzErr],
+                              VarManager::fgValues[VarManager::kVertexingLxy], VarManager::fgValues[VarManager::kVertexingLxyErr], VarManager::fgValues[VarManager::kVertexingLz], VarManager::fgValues[VarManager::kVertexingLzErr]
+                              );
+
+              }
+            }
             if (sign1 * sign2 < 0) {                                                    // +- pairs
               fHistMan->FillHistClass(histNames[icut][0].Data(), VarManager::fgValues); // reconstructed, unmatched
               for (unsigned int isig = 0; isig < fRecMCSignals.size(); isig++) {        // loop over MC signals
@@ -1943,30 +2010,60 @@ struct AnalysisSameEventPairing {
                     } else { // incorrect track-collision association
                       fHistMan->FillHistClass(histNamesMC[icut * fRecMCSignals.size() + isig][4].Data(), VarManager::fgValues);
                     }
-                    if (isAmbiInBunch) { // ambiguous in bunch
-                      fHistMan->FillHistClass(histNamesMC[icut * fRecMCSignals.size() + isig][5].Data(), VarManager::fgValues);
-                      if (isCorrectAssoc_leg1 && isCorrectAssoc_leg2) {
-                        fHistMan->FillHistClass(histNamesMC[icut * fRecMCSignals.size() + isig][6].Data(), VarManager::fgValues);
-                      } else {
-                        fHistMan->FillHistClass(histNamesMC[icut * fRecMCSignals.size() + isig][7].Data(), VarManager::fgValues);
+                    if constexpr (TPairType == VarManager::kDecayToEE) {
+                      if (isAmbiExtra) { // ambiguous pair, but already stored
+                        fHistMan->FillHistClass(histNamesMC[icut * fRecMCSignals.size() + isig][5].Data(), VarManager::fgValues);
+                      }
+                      if (isAmbiInBunch) { // ambiguous in bunch
+                        if (isCorrectAssoc_leg1 && isCorrectAssoc_leg2) {
+                          fHistMan->FillHistClass(histNamesMC[icut * fRecMCSignals.size() + isig][6].Data(), VarManager::fgValues);
+                        } else {
+                          fHistMan->FillHistClass(histNamesMC[icut * fRecMCSignals.size() + isig][7].Data(), VarManager::fgValues);
+                        }
+                      }
+                      if (isAmbiOutOfBunch) { // ambiguous out of bunch
+                        if (isCorrectAssoc_leg1 && isCorrectAssoc_leg2) {
+                          fHistMan->FillHistClass(histNamesMC[icut * fRecMCSignals.size() + isig][8].Data(), VarManager::fgValues);
+                        } else {
+                          fHistMan->FillHistClass(histNamesMC[icut * fRecMCSignals.size() + isig][9].Data(), VarManager::fgValues);
+                        }
                       }
                     }
-                    if (isAmbiOutOfBunch) { // ambiguous out of bunch
-                      fHistMan->FillHistClass(histNamesMC[icut * fRecMCSignals.size() + isig][8].Data(), VarManager::fgValues);
-                      if (isCorrectAssoc_leg1 && isCorrectAssoc_leg2) {
-                        fHistMan->FillHistClass(histNamesMC[icut * fRecMCSignals.size() + isig][9].Data(), VarManager::fgValues);
-                      } else {
-                        fHistMan->FillHistClass(histNamesMC[icut * fRecMCSignals.size() + isig][10].Data(), VarManager::fgValues);
+
+                    if constexpr (TPairType == VarManager::kDecayToMuMu) {
+                      if (isAmbiInBunch) { // ambiguous in bunch
+                        fHistMan->FillHistClass(histNamesMC[icut * fRecMCSignals.size() + isig][5].Data(), VarManager::fgValues);
+                        if (isCorrectAssoc_leg1 && isCorrectAssoc_leg2) {
+                          fHistMan->FillHistClass(histNamesMC[icut * fRecMCSignals.size() + isig][6].Data(), VarManager::fgValues);
+                        } else {
+                          fHistMan->FillHistClass(histNamesMC[icut * fRecMCSignals.size() + isig][7].Data(), VarManager::fgValues);
+                        }
+                      }
+                      if (isAmbiOutOfBunch) { // ambiguous out of bunch
+                        fHistMan->FillHistClass(histNamesMC[icut * fRecMCSignals.size() + isig][8].Data(), VarManager::fgValues);
+                        if (isCorrectAssoc_leg1 && isCorrectAssoc_leg2) {
+                          fHistMan->FillHistClass(histNamesMC[icut * fRecMCSignals.size() + isig][9].Data(), VarManager::fgValues);
+                        } else {
+                          fHistMan->FillHistClass(histNamesMC[icut * fRecMCSignals.size() + isig][10].Data(), VarManager::fgValues);
+                        }
                       }
                     }
                   }
                 }
                 if (fConfigQA) {
-                  if (isAmbiInBunch) {
-                    fHistMan->FillHistClass(histNames[icut][3].Data(), VarManager::fgValues);
+                  if constexpr (TPairType == VarManager::kDecayToEE) {
+                    if (isAmbiExtra) {
+                      fHistMan->FillHistClass(histNames[icut][3].Data(), VarManager::fgValues);
+                    }
                   }
-                  if (isAmbiOutOfBunch) {
-                    fHistMan->FillHistClass(histNames[icut][3 + 3].Data(), VarManager::fgValues);
+
+                  if constexpr (TPairType == VarManager::kDecayToMuMu) {
+                    if (isAmbiInBunch) {
+                      fHistMan->FillHistClass(histNames[icut][3].Data(), VarManager::fgValues);
+                    }
+                    if (isAmbiOutOfBunch) {
+                      fHistMan->FillHistClass(histNames[icut][3 + 3].Data(), VarManager::fgValues);
+                    }
                   }
                 }
               }
@@ -1979,11 +2076,18 @@ struct AnalysisSameEventPairing {
                   }
                 }
                 if (fConfigQA) {
-                  if (isAmbiInBunch) {
-                    fHistMan->FillHistClass(histNames[icut][4].Data(), VarManager::fgValues);
+                  if constexpr (TPairType == VarManager::kDecayToEE) {
+                    if (isAmbiExtra) {
+                      fHistMan->FillHistClass(histNames[icut][4].Data(), VarManager::fgValues);
+                    }
                   }
-                  if (isAmbiOutOfBunch) {
-                    fHistMan->FillHistClass(histNames[icut][4 + 3].Data(), VarManager::fgValues);
+                  if constexpr (TPairType == VarManager::kDecayToMuMu) {
+                    if (isAmbiInBunch) {
+                      fHistMan->FillHistClass(histNames[icut][4].Data(), VarManager::fgValues);
+                    }
+                    if (isAmbiOutOfBunch) {
+                      fHistMan->FillHistClass(histNames[icut][4 + 3].Data(), VarManager::fgValues);
+                    }
                   }
                 }
               } else { // -- pairs
@@ -1994,11 +2098,18 @@ struct AnalysisSameEventPairing {
                   }
                 }
                 if (fConfigQA) {
-                  if (isAmbiInBunch) {
-                    fHistMan->FillHistClass(histNames[icut][5].Data(), VarManager::fgValues);
+                  if constexpr (TPairType == VarManager::kDecayToEE) {
+                    if (isAmbiExtra) {
+                      fHistMan->FillHistClass(histNames[icut][5].Data(), VarManager::fgValues);
+                    }
                   }
-                  if (isAmbiOutOfBunch) {
-                    fHistMan->FillHistClass(histNames[icut][5 + 3].Data(), VarManager::fgValues);
+                  if constexpr (TPairType == VarManager::kDecayToMuMu) {
+                    if (isAmbiInBunch) {
+                      fHistMan->FillHistClass(histNames[icut][5].Data(), VarManager::fgValues);
+                    }
+                    if (isAmbiOutOfBunch) {
+                      fHistMan->FillHistClass(histNames[icut][5 + 3].Data(), VarManager::fgValues);
+                    }
                   }
                 }
               }
