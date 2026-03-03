@@ -9,14 +9,20 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
-#ifndef COMMON_TOOLS_TIMESTAMPMODULEH_
-#define COMMON_TOOLS_TIMESTAMPMODULEH_
+#ifndef COMMON_TOOLS_TIMESTAMPMODULE_H_
+#define COMMON_TOOLS_TIMESTAMPMODULE_H_
 
-#include "Framework/AnalysisDataModel.h"
+#include <CommonConstants/LHCConstants.h>
+#include <Framework/Configurable.h>
+#include <Framework/Logger.h>
 
-#include <array>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
+#include <map>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace o2
 {
@@ -96,6 +102,10 @@ class TimestampModule
         int64_t sorTimestamp = runDuration.first;            // timestamp of the SOR/SOX/STF in ms
         int64_t eorTimestamp = runDuration.second;           // timestamp of the EOR/EOX/ETF in ms
 
+        // clear cache to prevent interference with orbit reset queries from other code
+        // FIXME this should not have been a problem, to be investigated
+        ccdb->clearCache(timestampOpts.orbit_reset_path.value.data());
+
         const bool isUnanchoredRun3MC = runNumber >= 300000 && runNumber < 500000;
         if (timestampOpts.isRun2MC.value == 1 || isUnanchoredRun3MC) {
           // isRun2MC: bc/orbit distributions are not simulated in Run2 MC. All bcs are set to 0.
@@ -104,12 +114,12 @@ class TimestampModule
           orbitResetTimestamp = sorTimestamp * 1000; // from ms to us
         } else if (runNumber < 300000) {             // Run 2
           LOGF(debug, "Getting orbit-reset timestamp using start-of-run timestamp from CCDB");
-          auto ctp = ccdb->template getForTimeStamp<std::vector<int64_t>>(timestampOpts.orbit_reset_path.value.data(), sorTimestamp);
+          auto ctp = ccdb->template getSpecific<std::vector<int64_t>>(timestampOpts.orbit_reset_path.value.data(), sorTimestamp);
           orbitResetTimestamp = (*ctp)[0];
         } else {
           // sometimes orbit is reset after SOR. Using EOR timestamps for orbitReset query is more reliable
           LOGF(debug, "Getting orbit-reset timestamp using end-of-run timestamp from CCDB");
-          auto ctp = ccdb->template getForTimeStamp<std::vector<int64_t>>(timestampOpts.orbit_reset_path.value.data(), eorTimestamp / 2 + sorTimestamp / 2);
+          auto ctp = ccdb->template getSpecific<std::vector<int64_t>>(timestampOpts.orbit_reset_path.value.data(), eorTimestamp / 2 + sorTimestamp / 2);
           orbitResetTimestamp = (*ctp)[0];
         }
 
@@ -144,4 +154,4 @@ class TimestampModule
 } // namespace common
 } // namespace o2
 
-#endif // COMMON_TOOLS_TIMESTAMPMODULEH_
+#endif // COMMON_TOOLS_TIMESTAMPMODULE_H_

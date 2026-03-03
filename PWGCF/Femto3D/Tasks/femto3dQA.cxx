@@ -52,6 +52,7 @@ struct QAHistograms {
   Configurable<bool> _requestVertexITSTPC{"requestVertexITSTPC", false, ""};
   Configurable<int> _requestVertexTOForTRDmatched{"requestVertexTOFmatched", 0, "0 -> no selectio; 1 -> vertex is matched to TOF or TRD; 2 -> matched to both;"};
   Configurable<bool> _requestNoCollInTimeRangeStandard{"requestNoCollInTimeRangeStandard", false, ""};
+  Configurable<bool> _requestIsGoodITSLayersAll{"requestIsGoodITSLayersAll", false, "cut time intervals with dead ITS staves"};
   Configurable<std::pair<float, float>> _IRcut{"IRcut", std::pair<float, float>{0.f, 100.f}, "[min., max.] IR range to keep events within"};
   Configurable<std::pair<int, int>> _OccupancyCut{"OccupancyCut", std::pair<int, int>{0, 10000}, "[min., max.] occupancy range to keep events within"};
 
@@ -89,7 +90,6 @@ struct QAHistograms {
   std::shared_ptr<TH2> TPChisto;
   std::shared_ptr<TH2> TOFhisto;
 
-  Filter signFilter = o2::aod::singletrackselector::sign == _sign;
   Filter pFilter = o2::aod::singletrackselector::p > _min_P&& o2::aod::singletrackselector::p < _max_P;
   Filter etaFilter = nabs(o2::aod::singletrackselector::eta) < _eta;
 
@@ -181,6 +181,8 @@ struct QAHistograms {
         continue;
       if (_requestNoCollInTimeRangeStandard && !collision.noCollInTimeRangeStandard())
         continue;
+      if (_requestIsGoodITSLayersAll && !collision.isGoodITSLayersAll())
+        continue;
       if (collision.multPerc() < _centCut.value.first || collision.multPerc() >= _centCut.value.second)
         continue;
       if (collision.hadronicRate() < _IRcut.value.first || collision.hadronicRate() >= _IRcut.value.second)
@@ -195,7 +197,8 @@ struct QAHistograms {
     }
 
     for (const auto& track : tracks) {
-
+      if (track.sign() != _sign)
+        continue;
       if (_removeSameBunchPileup && !track.template singleCollSel_as<ColsType>().isNoSameBunchPileup())
         continue;
       if (_requestGoodZvtxFT0vsPV && !track.template singleCollSel_as<ColsType>().isGoodZvtxFT0vsPV())
@@ -206,7 +209,8 @@ struct QAHistograms {
         continue;
       if (_requestNoCollInTimeRangeStandard && !track.template singleCollSel_as<ColsType>().noCollInTimeRangeStandard())
         continue;
-
+      if (_requestIsGoodITSLayersAll && !track.template singleCollSel_as<ColsType>().isGoodITSLayersAll())
+        continue;
       if (std::fabs(track.template singleCollSel_as<ColsType>().posZ()) > _vertexZ)
         continue;
       if (track.template singleCollSel_as<ColsType>().multPerc() < _centCut.value.first || track.template singleCollSel_as<ColsType>().multPerc() >= _centCut.value.second)

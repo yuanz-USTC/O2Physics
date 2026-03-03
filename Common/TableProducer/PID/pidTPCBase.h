@@ -19,9 +19,15 @@
 #define COMMON_TABLEPRODUCER_PID_PIDTPCBASE_H_
 
 #include "Common/DataModel/Multiplicity.h"
-#include "Common/DataModel/PIDResponseTPC.h"
 
-#include "TMatrixD.h"
+#include <Framework/ASoA.h>
+#include <ReconstructionDataFormats/PID.h>
+
+#include <TMatrixD.h> // IWYU pragma: keep (do not replace with TMatrixDfwd.h)
+#include <TMatrixDfwd.h>
+
+#include <cstdlib>
+#include <vector>
 
 namespace o2::aod
 {
@@ -94,8 +100,8 @@ typedef struct Str_dEdx_correction {
     for (int i = 0; i < fMatrix.GetNrows(); i++) {
       for (int j = 0; j < fMatrix.GetNcols(); j++) {
         double param = fMatrix(i, j);
-        double value1 = i > static_cast<int>(vec1.size()) ? 0 : vec1[i];
-        double value2 = j > static_cast<int>(vec2.size()) ? 0 : vec2[j];
+        double value1 = i >= static_cast<int>(vec1.size()) ? 0 : vec1[i];
+        double value2 = j >= static_cast<int>(vec2.size()) ? 0 : vec2[j];
         result += param * value1 * value2;
       }
     }

@@ -50,7 +50,9 @@ enum JetTaggingSpecies {
   beauty = 2,
   lightflavour = 3,
   lightquark = 4,
-  gluon = 5
+  gluon = 5,
+  udg = 6,
+  strange = 7,
 };
 
 enum BJetTaggingMethod {
@@ -246,10 +248,9 @@ template <typename T, typename U>
 int jetParticleFromHFShower(T const& jet, U const& particles, typename U::iterator& hfparticle, bool searchUpToQuark)
 {
 
-  int origin = -1;
   for (const auto& particle : jet.template tracks_as<U>()) {
     hfparticle = particle; // for init if origin is 1 or 2, the particle is not hfparticle
-    origin = RecoDecay::getParticleOrigin(particles, particle, searchUpToQuark);
+    int origin = RecoDecay::getParticleOrigin(particles, particle, searchUpToQuark);
     if (origin == RecoDecay::OriginType::Prompt || origin == RecoDecay::OriginType::NonPrompt) { // 1=charm , 2=beauty
       hfparticle = particle;
       if (origin == RecoDecay::OriginType::Prompt) {
@@ -414,6 +415,45 @@ int16_t getJetFlavor(AnyJet const& jet, AllMCParticles const& mcparticles)
 }
 
 /**
+ * return also the s-jet flavor: 1 for c-jet, 2 for b-jet, 7 for s-jet
+ *                               6 for u,d or g jets.
+ *
+ * @param AnyJet the jet that we need to study its flavor
+ * @param AllMCParticles a vector of all the mc particles stack
+ */
+template <typename AnyJet, typename AllMCParticles>
+int16_t getSJetFlavor(AnyJet const& jet, AllMCParticles const& mcparticles)
+{
+  bool charmQuark = false;
+  bool strangeQuark = false;
+
+  for (auto const& mcpart : mcparticles) {
+    int pdgcode = mcpart.pdgCode();
+    if (std::abs(pdgcode) == 21 || (std::abs(pdgcode) >= 1 && std::abs(pdgcode) <= 5)) {
+      double dR = jetutilities::deltaR(jet, mcpart);
+
+      if (dR < jet.r() / 100.f) {
+        if (std::abs(pdgcode) == 5) {
+          return JetTaggingSpecies::beauty; // Beauty jet
+        } else if (std::abs(pdgcode) == 4) {
+          charmQuark = true;
+        } else if (std::abs(pdgcode) == 3) {
+          strangeQuark = true;
+        }
+      }
+    }
+  }
+
+  if (charmQuark) {
+    return JetTaggingSpecies::charm; // Charm jet
+  } else if (strangeQuark) {
+    return JetTaggingSpecies::strange; // Strange jet
+  }
+
+  return JetTaggingSpecies::udg; // Up, Down or Gluon jet
+}
+
+/**
  * return the jet flavor if it finds a HF hadron inside the jet: 0 for lf-jet, 1 for c-jet, 2 for b-jet
  *
  * @param AnyJet the jet that we need to study its flavor
@@ -501,7 +541,7 @@ bool svAcceptance(T const& sv, float svDispersionMax)
  * positive value is expected from secondary vertex
  *
  * @param jet
- * @param track which is needed aod::JTrackExtras
+ * @param track which is needed o2::aod::JTrackExtras
  */
 template <typename T, typename U>
 int getGeoSign(T const& jet, U const& track)
@@ -1022,7 +1062,7 @@ void analyzeJetTrackInfo4ML(AnalysisJet const& analysisJet, AnyTracks const& /*a
     tracksParams.emplace_back(BJetTrackParams{constituent.pt(), constituent.eta(), dotProduct, dotProduct / analysisJet.p(), deltaRJetTrack, std::abs(constituent.dcaXY()) * sign, constituent.sigmadcaXY(), std::abs(constituent.dcaZ()) * sign, constituent.sigmadcaZ(), std::abs(constituent.dcaXYZ()) * sign, constituent.sigmadcaXYZ(), constituent.p() / analysisJet.p(), rClosestSV});
   }
 
-  auto compare = [](BJetTrackParams& tr1, BJetTrackParams& tr2) {
+  auto compare = [](const BJetTrackParams& tr1, const BJetTrackParams& tr2) {
     return (tr1.signedIP2D / tr1.signedIP2DSign) > (tr2.signedIP2D / tr2.signedIP2DSign);
   };
 
@@ -1047,7 +1087,7 @@ void analyzeJetTrackInfo4MLnoSV(AnalysisJet const& analysisJet, AnyTracks const&
     tracksParams.emplace_back(BJetTrackParams{constituent.pt(), constituent.eta(), dotProduct, dotProduct / analysisJet.p(), deltaRJetTrack, std::abs(constituent.dcaXY()) * sign, constituent.sigmadcaXY(), std::abs(constituent.dcaZ()) * sign, constituent.sigmadcaZ(), std::abs(constituent.dcaXYZ()) * sign, constituent.sigmadcaXYZ(), constituent.p() / analysisJet.p(), 0.0});
   }
 
-  auto compare = [](BJetTrackParams& tr1, BJetTrackParams& tr2) {
+  auto compare = [](const BJetTrackParams& tr1, const BJetTrackParams& tr2) {
     return (tr1.signedIP2D / tr1.signedIP2DSign) > (tr2.signedIP2D / tr2.signedIP2DSign);
   };
 
@@ -1057,11 +1097,11 @@ void analyzeJetTrackInfo4MLnoSV(AnalysisJet const& analysisJet, AnyTracks const&
 
 // Looping over the track info and putting them in the input vector (for GNN b-jet tagging)
 template <typename AnalysisJet, typename AnyTracks, typename AnyOriginalTracks>
-void analyzeJetTrackInfo4GNN(AnalysisJet const& analysisJet, AnyTracks const& /*allTracks*/, AnyOriginalTracks const& /*origTracks*/, std::vector<std::vector<float>>& tracksParams, float trackPtMin = 0.5, int64_t nMaxConstit = 40)
+void analyzeJetTrackInfo4GNN(AnalysisJet const& analysisJet, AnyTracks const& /*allTracks*/, AnyOriginalTracks const& /*origTracks*/, std::vector<std::vector<float>>& tracksParams, float trackPtMin = 0.5, float trackDcaXYMax = 10.0, float trackDcaZMax = 10.0, int64_t nMaxConstit = 40)
 {
   for (const auto& constituent : analysisJet.template tracks_as<AnyTracks>()) {
 
-    if (constituent.pt() < trackPtMin) {
+    if (constituent.pt() < trackPtMin || !trackAcceptanceWithDca(constituent, trackDcaXYMax, trackDcaZMax)) {
       continue;
     }
 
@@ -1070,7 +1110,7 @@ void analyzeJetTrackInfo4GNN(AnalysisJet const& analysisJet, AnyTracks const& /*
     auto origConstit = constituent.template track_as<AnyOriginalTracks>();
 
     if (static_cast<int64_t>(tracksParams.size()) < nMaxConstit) {
-      tracksParams.emplace_back(std::vector<float>{constituent.pt(), origConstit.phi(), constituent.eta(), static_cast<float>(constituent.sign()), std::abs(constituent.dcaXY()) * sign, constituent.sigmadcaXY(), std::abs(constituent.dcaXYZ()) * sign, constituent.sigmadcaXYZ(), static_cast<float>(origConstit.itsNCls()), static_cast<float>(origConstit.tpcNClsFound()), static_cast<float>(origConstit.tpcNClsCrossedRows()), origConstit.itsChi2NCl(), origConstit.tpcChi2NCl()});
+      tracksParams.emplace_back(std::vector<float>{constituent.pt(), origConstit.phi(), constituent.eta(), static_cast<float>(constituent.sign()), std::abs(constituent.dcaXY()) * sign, constituent.sigmadcaXY(), std::abs(constituent.dcaZ()) * sign, constituent.sigmadcaZ(), static_cast<float>(origConstit.itsNCls()), static_cast<float>(origConstit.tpcNClsFound()), static_cast<float>(origConstit.tpcNClsCrossedRows()), origConstit.itsChi2NCl(), origConstit.tpcChi2NCl()});
     } else {
       // If there are more than nMaxConstit constituents in the jet, select only nMaxConstit constituents with the highest DCA_XY significance.
       size_t minIdx = 0;
@@ -1079,7 +1119,7 @@ void analyzeJetTrackInfo4GNN(AnalysisJet const& analysisJet, AnyTracks const& /*
           minIdx = i;
       }
       if (std::abs(constituent.dcaXY()) * sign / constituent.sigmadcaXY() > tracksParams[minIdx][4] / tracksParams[minIdx][5])
-        tracksParams[minIdx] = std::vector<float>{constituent.pt(), origConstit.phi(), constituent.eta(), static_cast<float>(constituent.sign()), std::abs(constituent.dcaXY()) * sign, constituent.sigmadcaXY(), std::abs(constituent.dcaXYZ()) * sign, constituent.sigmadcaXYZ(), static_cast<float>(origConstit.itsNCls()), static_cast<float>(origConstit.tpcNClsFound()), static_cast<float>(origConstit.tpcNClsCrossedRows()), origConstit.itsChi2NCl(), origConstit.tpcChi2NCl()};
+        tracksParams[minIdx] = std::vector<float>{constituent.pt(), origConstit.phi(), constituent.eta(), static_cast<float>(constituent.sign()), std::abs(constituent.dcaXY()) * sign, constituent.sigmadcaXY(), std::abs(constituent.dcaZ()) * sign, constituent.sigmadcaZ(), static_cast<float>(origConstit.itsNCls()), static_cast<float>(origConstit.tpcNClsFound()), static_cast<float>(origConstit.tpcNClsCrossedRows()), origConstit.itsChi2NCl(), origConstit.tpcChi2NCl()};
     }
   }
 }

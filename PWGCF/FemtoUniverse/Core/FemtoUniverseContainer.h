@@ -26,12 +26,11 @@
 #include "Common/Core/RecoDecay.h"
 
 #include "Framework/HistogramRegistry.h"
+#include <Framework/Logger.h>
 
 #include "Math/Vector4D.h"
 #include "TDatabasePDG.h"
 #include "TMath.h"
-
-#include <fairlogger/Logger.h>
 
 #include <string>
 #include <vector>
@@ -57,7 +56,7 @@ enum EventType { same, ///< Pair from same event
 /// \brief Container for all histogramming related to the correlation function. The two
 /// particles of the pair are passed here, and the correlation function and QA histograms
 /// are filled according to the specified observable
-/// \tparam eventType Type of the event (same/mixed)
+/// \tparam eventType Type of the event (same or mixed)
 /// \tparam obs Observable to be computed (k*/Q_inv/...)
 template <femto_universe_container::EventType eventType, femto_universe_container::Observable obs>
 class FemtoUniverseContainer
@@ -91,6 +90,8 @@ class FemtoUniverseContainer
     mHistogramRegistry->add((folderName + "/DeltaEtaDeltaPhi").c_str(), ";  #Delta#varphi (rad); #Delta#eta", kTH2F, {phiAxis, etaAxis});
     if (use3dplots) {
       mHistogramRegistry->add((folderName + "/relPairkstarmTMult").c_str(), ("; " + femtoObs + "; #it{m}_{T} (GeV/#it{c}^{2}); Multiplicity").c_str(), kTH3F, {femtoObsAxis, mTAxis3D, multAxis3D});
+      mHistogramRegistry->add((folderName + "/relPairkstarkTMult").c_str(), ("; " + femtoObs + "; #it{k}_{T} (GeV/#it{c}^{2}); Multiplicity").c_str(), kTH3F, {femtoObsAxis, kTAxis, multAxis3D});
+      mHistogramRegistry->add((folderName + "/relPairkTPtPart1PtPart2").c_str(), ("; #it{k}_{T} (GeV/#it{c}^{2}); #it{p}_{T,1} (GeV/#it{c}^{2}); #it{p}_{T,2} (GeV/#it{c}^{2})"), kTH3F, {kTAxis, {375, 0., 7.5}, {375, 0., 7.5}});
     }
   }
 
@@ -199,6 +200,8 @@ class FemtoUniverseContainer
     mHistogramRegistry->fill(HIST(FolderSuffix[EventType]) + HIST(o2::aod::femtouniverse_mc_particle::MCTypeName[mc]) + HIST("/DeltaEtaDeltaPhi"), deltaPhi, deltaEta, weight);
     if (use3dplots) {
       mHistogramRegistry->fill(HIST(FolderSuffix[EventType]) + HIST(o2::aod::femtouniverse_mc_particle::MCTypeName[mc]) + HIST("/relPairkstarmTMult"), femtoObs, mT, mult, weight);
+      mHistogramRegistry->fill(HIST(FolderSuffix[EventType]) + HIST(o2::aod::femtouniverse_mc_particle::MCTypeName[mc]) + HIST("/relPairkstarkTMult"), femtoObs, kT, mult, weight);
+      mHistogramRegistry->fill(HIST(FolderSuffix[EventType]) + HIST(o2::aod::femtouniverse_mc_particle::MCTypeName[mc]) + HIST("/relPairkTPtPart1PtPart2"), kT, part1.pt(), part2.pt());
     }
   }
 

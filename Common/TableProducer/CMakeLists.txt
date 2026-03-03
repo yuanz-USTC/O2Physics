@@ -22,14 +22,14 @@ o2physics_add_dpl_workflow(trackselection
                     PUBLIC_LINK_LIBRARIES O2Physics::AnalysisCore
                     COMPONENT_NAME Analysis)
 
-o2physics_add_dpl_workflow(event-selection
-                    SOURCES eventSelection.cxx
+o2physics_add_dpl_workflow(event-selection-service
+                    SOURCES eventSelectionService.cxx
                     PUBLIC_LINK_LIBRARIES O2Physics::AnalysisCCDB
                                           O2::DataFormatsITSMFT
                     COMPONENT_NAME Analysis)
 
-o2physics_add_dpl_workflow(event-selection-service
-                    SOURCES eventSelectionService.cxx
+o2physics_add_dpl_workflow(event-selection-service-run2
+                    SOURCES eventSelectionServiceRun2.cxx
                     PUBLIC_LINK_LIBRARIES O2Physics::AnalysisCCDB
                                           O2::DataFormatsITSMFT
                     COMPONENT_NAME Analysis)
@@ -59,11 +59,6 @@ o2physics_add_dpl_workflow(timestamp
                     PUBLIC_LINK_LIBRARIES O2Physics::AnalysisCore
                     COMPONENT_NAME Analysis)
 
-o2physics_add_dpl_workflow(timestamptester
-                    SOURCES timestampTester.cxx
-                    PUBLIC_LINK_LIBRARIES O2Physics::AnalysisCore
-                    COMPONENT_NAME Analysis)
-
 o2physics_add_dpl_workflow(weak-decay-indices
                     SOURCES weakDecayIndices.cxx
                     PUBLIC_LINK_LIBRARIES O2Physics::AnalysisCore
@@ -79,14 +74,19 @@ o2physics_add_dpl_workflow(track-propagation
                     PUBLIC_LINK_LIBRARIES O2Physics::AnalysisCore
                     COMPONENT_NAME Analysis)
 
+o2physics_add_dpl_workflow(propagationservice
+                    SOURCES propagationService.cxx
+                    PUBLIC_LINK_LIBRARIES O2Physics::AnalysisCore O2::DCAFitter KFParticle::KFParticle O2Physics::TPCDriftManager
+                    COMPONENT_NAME Analysis)
+
+o2physics_add_dpl_workflow(propagationservice-run2
+                    SOURCES propagationServiceRun2.cxx
+                    PUBLIC_LINK_LIBRARIES O2Physics::AnalysisCore O2::DCAFitter KFParticle::KFParticle O2Physics::TPCDriftManager
+                    COMPONENT_NAME Analysis)
+
 o2physics_add_dpl_workflow(track-dca-cov-filler-run2
                     SOURCES trackDcaCovFillerRun2.cxx
                     PUBLIC_LINK_LIBRARIES O2::DetectorsBase O2Physics::AnalysisCore
-                    COMPONENT_NAME Analysis)
-
-o2physics_add_dpl_workflow(track-propagation-tester
-                    SOURCES trackPropagationTester.cxx
-                    PUBLIC_LINK_LIBRARIES O2Physics::AnalysisCore O2Physics::trackSelectionRequest
                     COMPONENT_NAME Analysis)
 
 o2physics_add_dpl_workflow(calo-clusters
@@ -98,8 +98,8 @@ o2physics_add_dpl_workflow(fwdtrackextension
                     SOURCES fwdtrackextension.cxx
                     PUBLIC_LINK_LIBRARIES O2Physics::AnalysisCore
                                           O2::ReconstructionDataFormats
-                                          O2::DetectorsBase
-                                          O2::DetectorsCommonDataFormats
+					  O2::GlobalTracking
+					  O2::MCHTracking
                     COMPONENT_NAME Analysis)
 
 o2physics_add_dpl_workflow(track-to-collision-associator
@@ -142,8 +142,8 @@ o2physics_add_dpl_workflow(match-mft-ft0
                                           O2::DetectorsBase O2::DetectorsCommonDataFormats
                     COMPONENT_NAME Analysis)
 
-o2physics_add_dpl_workflow(zdc-task-inter-calib
-                    SOURCES zdcTaskInterCalib.cxx
+o2physics_add_dpl_workflow(zdc-extra-table-producer
+                    SOURCES zdcExtraTableProducer.cxx
                     PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore
                     COMPONENT_NAME Analysis)
 
@@ -175,4 +175,9 @@ o2physics_add_dpl_workflow(muon-realignment
 o2physics_add_dpl_workflow(selectionstudytable
                     SOURCES selectionStudyTable.cxx
                     PUBLIC_LINK_LIBRARIES O2Physics::AnalysisCore
+                    COMPONENT_NAME Analysis)
+
+o2physics_add_dpl_workflow(zdc-task-light-ions
+                    SOURCES zdcTaskLightIons.cxx
+                    PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore
                     COMPONENT_NAME Analysis)

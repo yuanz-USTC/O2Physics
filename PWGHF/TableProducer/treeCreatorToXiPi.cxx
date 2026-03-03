@@ -75,6 +75,8 @@ DECLARE_SOA_COLUMN(PzPiFromCharmBaryon, pzPiFromCharmBaryon, float);
 DECLARE_SOA_COLUMN(PxLambda, pxLambda, float);
 DECLARE_SOA_COLUMN(PyLambda, pyLambda, float);
 DECLARE_SOA_COLUMN(PzLambda, pzLambda, float);
+DECLARE_SOA_COLUMN(PtCharmBaryon, ptCharmBaryon, float);
+DECLARE_SOA_COLUMN(PtPiFromCharmBaryon, ptPiFromCharmBaryon, float);
 DECLARE_SOA_COLUMN(PxPiFromCasc, pxPiFromCasc, float);
 DECLARE_SOA_COLUMN(PyPiFromCasc, pyPiFromCasc, float);
 DECLARE_SOA_COLUMN(PzPiFromCasc, pzPiFromCasc, float);
@@ -136,7 +138,7 @@ DECLARE_SOA_COLUMN(NTpcRowsNegV0Dau, nTpcRowsNegV0Dau, int16_t);
 // from creator - MC
 DECLARE_SOA_COLUMN(FlagMcMatchRec, flagMcMatchRec, int8_t); // reconstruction level
 DECLARE_SOA_COLUMN(DebugMcRec, debugMcRec, int8_t);         // debug flag for mis-association reconstruction level
-DECLARE_SOA_COLUMN(OriginRec, originRec, int8_t);
+DECLARE_SOA_COLUMN(OriginMcRec, originMcRec, int8_t);
 DECLARE_SOA_COLUMN(CollisionMatched, collisionMatched, bool);
 // from selector
 DECLARE_SOA_COLUMN(StatusPidLambda, statusPidLambda, bool);
@@ -169,6 +171,7 @@ DECLARE_SOA_TABLE(HfToXiPiFulls, "AOD", "HFTOXIPIFULL",
                   full::XDecayVtxV0, full::YDecayVtxV0, full::ZDecayVtxV0,
                   full::SignDecay,
                   full::CovVtxCharmBaryonXX, full::CovVtxCharmBaryonYY, full::CovVtxCharmBaryonZZ,
+                  full::PtCharmBaryon, full::PtPiFromCharmBaryon,
                   full::PxCharmBaryon, full::PyCharmBaryon, full::PzCharmBaryon,
                   full::PxCasc, full::PyCasc, full::PzCasc,
                   full::PxPiFromCharmBaryon, full::PyPiFromCharmBaryon, full::PzPiFromCharmBaryon,
@@ -194,7 +197,7 @@ DECLARE_SOA_TABLE(HfToXiPiFulls, "AOD", "HFTOXIPIFULL",
                   full::StatusInvMassLambda, full::StatusInvMassCascade, full::StatusInvMassCharmBaryon, full::ResultSelections, full::PidTpcInfoStored, full::PidTofInfoStored,
                   full::TpcNSigmaPiFromCharmBaryon, full::TpcNSigmaPiFromCasc, full::TpcNSigmaPiFromLambda, full::TpcNSigmaPrFromLambda,
                   full::TofNSigmaPiFromCharmBaryon, full::TofNSigmaPiFromCasc, full::TofNSigmaPiFromLambda, full::TofNSigmaPrFromLambda,
-                  full::FlagMcMatchRec, full::DebugMcRec, full::OriginRec, full::CollisionMatched);
+                  full::FlagMcMatchRec, full::DebugMcRec, full::OriginMcRec, full::CollisionMatched);
 
 DECLARE_SOA_TABLE(HfToXiPiLites, "AOD", "HFTOXIPILITE",
                   full::XPv, full::YPv, full::ZPv, full::Centrality, collision::NumContrib, collision::Chi2,
@@ -202,6 +205,7 @@ DECLARE_SOA_TABLE(HfToXiPiLites, "AOD", "HFTOXIPILITE",
                   full::XDecayVtxCascade, full::YDecayVtxCascade, full::ZDecayVtxCascade,
                   full::XDecayVtxV0, full::YDecayVtxV0, full::ZDecayVtxV0,
                   full::SignDecay,
+                  full::PtCharmBaryon, full::PtPiFromCharmBaryon,
                   full::PxCharmBaryon, full::PyCharmBaryon, full::PzCharmBaryon,
                   full::PxPiFromCharmBaryon, full::PyPiFromCharmBaryon, full::PzPiFromCharmBaryon,
                   full::PxPiFromCasc, full::PyPiFromCasc, full::PzPiFromCasc,
@@ -210,7 +214,9 @@ DECLARE_SOA_TABLE(HfToXiPiLites, "AOD", "HFTOXIPILITE",
                   full::ImpactParCascXY, full::ImpactParPiFromCharmBaryonXY,
                   full::ErrImpactParCascXY, full::ErrImpactParPiFromCharmBaryonXY,
                   full::InvMassLambda, full::InvMassCascade, full::InvMassCharmBaryon,
+                  full::CosPAV0, full::CosPACharmBaryon, full::CosPACasc,
                   full::EtaV0PosDau, full::EtaV0NegDau, full::EtaPiFromCasc, full::EtaPiFromCharmBaryon,
+                  full::EtaCharmBaryon,
                   full::DcaXYToPvV0Dau0, full::DcaXYToPvV0Dau1, full::DcaXYToPvCascDau,
                   full::DcaCascDau, full::DcaV0Dau, full::DcaCharmBaryonDau,
                   full::ErrorDecayLengthCharmBaryon, full::NormImpParCascade, full::NormImpParPiFromCharmBar,
@@ -219,7 +225,7 @@ DECLARE_SOA_TABLE(HfToXiPiLites, "AOD", "HFTOXIPILITE",
                   full::PidTpcInfoStored, full::PidTofInfoStored,
                   full::TpcNSigmaPiFromCharmBaryon, full::TpcNSigmaPiFromCasc, full::TpcNSigmaPiFromLambda, full::TpcNSigmaPrFromLambda,
                   full::TofNSigmaPiFromCharmBaryon, full::TofNSigmaPiFromCasc, full::TofNSigmaPiFromLambda, full::TofNSigmaPrFromLambda,
-                  full::FlagMcMatchRec, full::OriginRec, full::CollisionMatched);
+                  full::FlagMcMatchRec, full::OriginMcRec, full::CollisionMatched);
 
 } // namespace o2::aod
 
@@ -246,19 +252,19 @@ struct HfTreeCreatorToXiPi {
     }
   }
 
-  template <bool useCentrality, typename T>
+  template <bool UseCentrality, typename T>
   void fillEvent(const T& collision, float cutZPv)
   {
     rowEv(
       collision.sel8(), std::abs(collision.posZ()) < cutZPv);
   }
 
-  template <bool useCentrality, typename MyEventTableType, typename T>
+  template <bool UseCentrality, typename MyEventTableType, typename T>
   void fillCandidate(const T& candidate, int8_t flagMc, int8_t debugMc, int8_t originMc, bool collisionMatched)
   {
 
     float centrality = -999.f;
-    if constexpr (useCentrality) {
+    if constexpr (UseCentrality) {
       auto const& collision = candidate.template collision_as<MyEventTableType>();
       centrality = o2::hf_centrality::getCentralityColl(collision);
     }
@@ -283,6 +289,8 @@ struct HfTreeCreatorToXiPi {
       candidate.covVtxCharmBaryon0(),
       candidate.covVtxCharmBaryon3(),
       candidate.covVtxCharmBaryon5(),
+      RecoDecay::pt(candidate.pxCharmBaryon(), candidate.pyCharmBaryon()),
+      RecoDecay::pt(candidate.pxBachFromCharmBaryon(), candidate.pyBachFromCharmBaryon()),
       candidate.pxCharmBaryon(),
       candidate.pyCharmBaryon(),
       candidate.pzCharmBaryon(),
@@ -376,13 +384,13 @@ struct HfTreeCreatorToXiPi {
       collisionMatched);
   }
 
-  template <bool useCentrality, typename MyEventTableType, typename T>
+  template <bool UseCentrality, typename MyEventTableType, typename T>
   void fillCandidateLite(const T& candidate, int8_t flagMc, int8_t originMc, bool collisionMatched)
   {
     if (candidate.resultSelections() && candidate.statusPidCharmBaryon() && candidate.statusInvMassLambda() && candidate.statusInvMassCascade() && candidate.statusInvMassCharmBaryon()) {
 
       float centrality = -999.f;
-      if constexpr (useCentrality) {
+      if constexpr (UseCentrality) {
         auto const& collision = candidate.template collision_as<MyEventTableType>();
         centrality = o2::hf_centrality::getCentralityColl(collision);
       }
@@ -404,6 +412,8 @@ struct HfTreeCreatorToXiPi {
         candidate.yDecayVtxV0(),
         candidate.zDecayVtxV0(),
         candidate.signDecay(),
+        RecoDecay::pt(candidate.pxCharmBaryon(), candidate.pyCharmBaryon()),
+        RecoDecay::pt(candidate.pxBachFromCharmBaryon(), candidate.pyBachFromCharmBaryon()),
         candidate.pxCharmBaryon(),
         candidate.pyCharmBaryon(),
         candidate.pzCharmBaryon(),
@@ -426,10 +436,14 @@ struct HfTreeCreatorToXiPi {
         candidate.invMassLambda(),
         candidate.invMassCascade(),
         candidate.invMassCharmBaryon(),
+        candidate.cosPAV0(),
+        candidate.cosPACharmBaryon(),
+        candidate.cosPACasc(),
         candidate.etaV0PosDau(),
         candidate.etaV0NegDau(),
         candidate.etaBachFromCasc(),
         candidate.etaBachFromCharmBaryon(),
+        candidate.etaCharmBaryon(),
         candidate.dcaXYToPvV0Dau0(),
         candidate.dcaXYToPvV0Dau1(),
         candidate.dcaXYToPvCascDau(),
@@ -490,7 +504,7 @@ struct HfTreeCreatorToXiPi {
     // Filling candidate properties
     rowCandidateFull.reserve(candidates.size());
     for (const auto& candidate : candidates) {
-      fillCandidate<false, MyEventTable>(candidate, candidate.flagMcMatchRec(), candidate.debugMcRec(), candidate.originRec(), candidate.collisionMatched());
+      fillCandidate<false, MyEventTable>(candidate, candidate.flagMcMatchRec(), candidate.debugMcRec(), candidate.originMcRec(), candidate.collisionMatched());
     }
   }
   PROCESS_SWITCH(HfTreeCreatorToXiPi, processMcFullXic0, "Process MC with full information for xic0 w/o centrality", false);
@@ -507,7 +521,7 @@ struct HfTreeCreatorToXiPi {
     // Filling candidate properties
     rowCandidateFull.reserve(candidates.size());
     for (const auto& candidate : candidates) {
-      fillCandidate<false, MyEventTable>(candidate, candidate.flagMcMatchRec(), candidate.debugMcRec(), candidate.originRec(), candidate.collisionMatched());
+      fillCandidate<false, MyEventTable>(candidate, candidate.flagMcMatchRec(), candidate.debugMcRec(), candidate.originMcRec(), candidate.collisionMatched());
     }
   }
   PROCESS_SWITCH(HfTreeCreatorToXiPi, processMcFullOmegac0, "Process MC with full information for omegac0", false);
@@ -592,7 +606,7 @@ struct HfTreeCreatorToXiPi {
     // Filling candidate properties
     rowCandidateLite.reserve(candidates.size());
     for (const auto& candidate : candidates) {
-      fillCandidateLite<false, MyEventTable>(candidate, candidate.flagMcMatchRec(), candidate.originRec(), candidate.collisionMatched());
+      fillCandidateLite<false, MyEventTable>(candidate, candidate.flagMcMatchRec(), candidate.originMcRec(), candidate.collisionMatched());
     }
   }
   PROCESS_SWITCH(HfTreeCreatorToXiPi, processMcLiteXic0, "Process MC and produce lite table version for xic0", false);
@@ -609,7 +623,7 @@ struct HfTreeCreatorToXiPi {
     // Filling candidate properties
     rowCandidateLite.reserve(candidates.size());
     for (const auto& candidate : candidates) {
-      fillCandidateLite<true, MyEventTableWithFT0C>(candidate, candidate.flagMcMatchRec(), candidate.originRec(), candidate.collisionMatched());
+      fillCandidateLite<true, MyEventTableWithFT0C>(candidate, candidate.flagMcMatchRec(), candidate.originMcRec(), candidate.collisionMatched());
     }
   }
   PROCESS_SWITCH(HfTreeCreatorToXiPi, processMcLiteXic0WithFT0C, "Process MC and produce lite table version for Xic0 with FT0C", false);
@@ -626,7 +640,7 @@ struct HfTreeCreatorToXiPi {
     // Filling candidate properties
     rowCandidateLite.reserve(candidates.size());
     for (const auto& candidate : candidates) {
-      fillCandidateLite<true, MyEventTableWithFT0M>(candidate, candidate.flagMcMatchRec(), candidate.originRec(), candidate.collisionMatched());
+      fillCandidateLite<true, MyEventTableWithFT0M>(candidate, candidate.flagMcMatchRec(), candidate.originMcRec(), candidate.collisionMatched());
     }
   }
   PROCESS_SWITCH(HfTreeCreatorToXiPi, processMcLiteXic0WithFT0M, "Process MC and produce lite table version for Xic0 with FT0M", false);
@@ -643,7 +657,7 @@ struct HfTreeCreatorToXiPi {
     // Filling candidate properties
     rowCandidateLite.reserve(candidates.size());
     for (const auto& candidate : candidates) {
-      fillCandidateLite<true, MyEventTableWithNTracksPV>(candidate, candidate.flagMcMatchRec(), candidate.originRec(), candidate.collisionMatched());
+      fillCandidateLite<true, MyEventTableWithNTracksPV>(candidate, candidate.flagMcMatchRec(), candidate.originMcRec(), candidate.collisionMatched());
     }
   }
   PROCESS_SWITCH(HfTreeCreatorToXiPi, processMcLiteXic0WithNTracksPV, "Process MC and produce lite table version for Xic0 with NTracksPV", false);
@@ -660,7 +674,7 @@ struct HfTreeCreatorToXiPi {
     // Filling candidate properties
     rowCandidateLite.reserve(candidates.size());
     for (const auto& candidate : candidates) {
-      fillCandidateLite<false, MyEventTable>(candidate, candidate.flagMcMatchRec(), candidate.originRec(), candidate.collisionMatched());
+      fillCandidateLite<false, MyEventTable>(candidate, candidate.flagMcMatchRec(), candidate.originMcRec(), candidate.collisionMatched());
     }
   }
   PROCESS_SWITCH(HfTreeCreatorToXiPi, processMcLiteOmegac0, "Process MC and produce lite table version for omegac0", false);

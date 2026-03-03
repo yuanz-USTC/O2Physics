@@ -51,6 +51,7 @@ struct FemtoCorrelationsMC {
   Configurable<bool> _requestVertexITSTPC{"requestVertexITSTPC", false, ""};
   Configurable<int> _requestVertexTOForTRDmatched{"requestVertexTOFmatched", 0, "0 -> no selectio; 1 -> vertex is matched to TOF or TRD; 2 -> matched to both;"};
   Configurable<bool> _requestNoCollInTimeRangeStandard{"requestNoCollInTimeRangeStandard", false, ""};
+  Configurable<bool> _requestIsGoodITSLayersAll{"requestIsGoodITSLayersAll", false, "cut time intervals with dead ITS staves"};
   Configurable<std::pair<float, float>> _IRcut{"IRcut", std::pair<float, float>{0.f, 100.f}, "[min., max.] IR range to keep events within"};
   Configurable<std::pair<int, int>> _OccupancyCut{"OccupancyCut", std::pair<int, int>{0, 10000}, "[min., max.] occupancy range to keep events within"};
 
@@ -161,7 +162,13 @@ struct FemtoCorrelationsMC {
     int N = _dcaBinning.value[0]; // number of bins -- must be odd otherwise will be increased by 1
     if (N % 2 != 1)
       N += 1;
-    auto var_bins = calc_var_bins(N + 1, _dcaBinning.value[1], static_cast<int>(_dcaBinning.value[2]));
+
+    std::unique_ptr<double[]> dca_bins;
+    if (static_cast<int>(_dcaBinning.value[2]) != 1.0) {
+      dca_bins = calc_var_bins(N + 1, _dcaBinning.value[1], static_cast<int>(_dcaBinning.value[2]));
+    } else {
+      dca_bins = calc_const_bins(N, -_dcaBinning.value[1], _dcaBinning.value[1]);
+    }
     auto const_bins = calc_const_bins(100, 0., 5.0);
 
     for (unsigned int i = 0; i < _centBins.value.size() - 1; i++) {
@@ -171,9 +178,9 @@ struct FemtoCorrelationsMC {
       DCA_histos_1_perMult[1] = registry.add<TH3>(Form("Cent%i/FirstParticle/dcaxyz_vs_pt_weakdecay", i), "dcaxyz_vs_pt_weakdecay", kTH3F, {{1, 0, 1, "pt"}, {1, 0, 1, "DCA_XY(pt) weakdecay"}, {1, 0, 1, "DCA_Z(pt) weakdecay"}});
       DCA_histos_1_perMult[2] = registry.add<TH3>(Form("Cent%i/FirstParticle/dcaxyz_vs_pt_material", i), "dcaxyz_vs_pt_material", kTH3F, {{1, 0, 1, "pt"}, {1, 0, 1, "DCA_XY(pt) material"}, {1, 0, 1, "DCA_Z(pt) material"}});
 
-      DCA_histos_1_perMult[0]->SetBins(100, &const_bins[0], N, &var_bins[0], N, &var_bins[0]); // set variable bins in Y and Z axis; constant on X
-      DCA_histos_1_perMult[1]->SetBins(100, &const_bins[0], N, &var_bins[0], N, &var_bins[0]);
-      DCA_histos_1_perMult[2]->SetBins(100, &const_bins[0], N, &var_bins[0], N, &var_bins[0]);
+      DCA_histos_1_perMult[0]->SetBins(100, &const_bins[0], N, &dca_bins[0], N, &dca_bins[0]); // set variable bins in Y and Z axis; constant on X
+      DCA_histos_1_perMult[1]->SetBins(100, &const_bins[0], N, &dca_bins[0], N, &dca_bins[0]);
+      DCA_histos_1_perMult[2]->SetBins(100, &const_bins[0], N, &dca_bins[0], N, &dca_bins[0]);
 
       std::map<int, std::shared_ptr<TH1>> Purity_histos_1_perMult;
       Purity_histos_1_perMult[11] = registry.add<TH1>(Form("Cent%i/FirstParticle/pSpectraEl", i), "pSpectraEl", kTH1F, {{100, 0., 5., "p"}});
@@ -193,9 +200,9 @@ struct FemtoCorrelationsMC {
         DCA_histos_2_perMult[1] = registry.add<TH3>(Form("Cent%i/SecondParticle/dcaxyz_vs_pt_weakdecay", i), "dcaxyz_vs_pt_weakdecay", kTH3F, {{1, 0, 1, "pt"}, {1, 0, 1, "DCA_XY(pt) weakdecay"}, {1, 0, 1, "DCA_Z(pt) weakdecay"}});
         DCA_histos_2_perMult[2] = registry.add<TH3>(Form("Cent%i/SecondParticle/dcaxyz_vs_pt_material", i), "dcaxyz_vs_pt_material", kTH3F, {{1, 0, 1, "pt"}, {1, 0, 1, "DCA_XY(pt) material"}, {1, 0, 1, "DCA_Z(pt) material"}});
 
-        DCA_histos_2_perMult[0]->SetBins(100, &const_bins[0], N, &var_bins[0], N, &var_bins[0]); // set variable bins in Y and Z axis; constant on X
-        DCA_histos_2_perMult[1]->SetBins(100, &const_bins[0], N, &var_bins[0], N, &var_bins[0]);
-        DCA_histos_2_perMult[2]->SetBins(100, &const_bins[0], N, &var_bins[0], N, &var_bins[0]);
+        DCA_histos_2_perMult[0]->SetBins(100, &const_bins[0], N, &dca_bins[0], N, &dca_bins[0]); // set variable bins in Y and Z axis; constant on X
+        DCA_histos_2_perMult[1]->SetBins(100, &const_bins[0], N, &dca_bins[0], N, &dca_bins[0]);
+        DCA_histos_2_perMult[2]->SetBins(100, &const_bins[0], N, &dca_bins[0], N, &dca_bins[0]);
 
         std::map<int, std::shared_ptr<TH1>> Purity_histos_2_perMult;
         Purity_histos_2_perMult[11] = registry.add<TH1>(Form("Cent%i/SecondParticle/pSpectraEl", i), "pSpectraEl", kTH1F, {{100, 0., 5., "p"}});
@@ -350,7 +357,8 @@ struct FemtoCorrelationsMC {
         continue;
       if (_requestNoCollInTimeRangeStandard && !track.template singleCollSel_as<soa::Filtered<FilteredCollisions>>().noCollInTimeRangeStandard())
         continue;
-
+      if (_requestIsGoodITSLayersAll && !track.template singleCollSel_as<soa::Filtered<FilteredCollisions>>().isGoodITSLayersAll())
+        continue;
       unsigned int centBin = o2::aod::singletrackselector::getBinIndex<unsigned int>(track.template singleCollSel_as<soa::Filtered<FilteredCollisions>>().multPerc(), _centBins);
 
       if (track.sign() == _sign_1 && (track.p() < _PIDtrshld_1 ? o2::aod::singletrackselector::TPCselection<true>(track, TPCcuts_1, _itsNSigma_1.value) : o2::aod::singletrackselector::TOFselection(track, TOFcuts_1, _tpcNSigmaResidual_1.value))) {
@@ -412,7 +420,8 @@ struct FemtoCorrelationsMC {
         continue;
       if (_requestNoCollInTimeRangeStandard && !collision.noCollInTimeRangeStandard())
         continue;
-
+      if (_requestIsGoodITSLayersAll && !collision.isGoodITSLayersAll())
+        continue;
       if (selectedtracks_1.find(collision.globalIndex()) == selectedtracks_1.end()) {
         if (IsIdentical)
           continue;

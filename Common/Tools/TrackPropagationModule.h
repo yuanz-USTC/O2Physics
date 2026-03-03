@@ -10,22 +10,39 @@
 // or submit itself to any jurisdiction.
 
 /// \file TrackPropagationModule.h
-/// \brief track propagation module functionality to be used in tasks
+/// \brief track propagation module functionality to be used in core services
 /// \author ALICE
 
 #ifndef COMMON_TOOLS_TRACKPROPAGATIONMODULE_H_
 #define COMMON_TOOLS_TRACKPROPAGATIONMODULE_H_
 
-#include <memory>
-#include <cstdlib>
-#include <cmath>
-#include <array>
-#include <string>
-#include "Framework/AnalysisDataModel.h"
-#include "Framework/Configurable.h"
-#include "Framework/HistogramSpec.h"
+#include "Common/Core/TableHelper.h"
+#include "Common/Core/trackUtilities.h"
+#include "Common/DataModel/TrackSelectionTables.h"
 #include "Common/Tools/TrackTuner.h"
-#include "TableHelper.h"
+
+#include <CommonConstants/GeomConstants.h>
+#include <DetectorsBase/Propagator.h>
+#include <Framework/AnalysisDataModel.h>
+#include <Framework/AnalysisHelpers.h>
+#include <Framework/Configurable.h>
+#include <Framework/DataTypes.h>
+#include <Framework/DeviceSpec.h>
+#include <Framework/HistogramRegistry.h>
+#include <Framework/HistogramSpec.h>
+#include <Framework/Logger.h>
+#include <ReconstructionDataFormats/DCA.h>
+#include <ReconstructionDataFormats/TrackParametrization.h>
+#include <ReconstructionDataFormats/TrackParametrizationWithError.h>
+
+#include <TH1.h>
+#include <TH2.h>
+
+#include <array>
+#include <cmath>
+#include <cstdlib>
+#include <memory>
+#include <string>
 
 //__________________________________________
 // track propagation module
@@ -73,6 +90,7 @@ class TrackPropagationModule
   }
 
   // controls behaviour
+  bool fillTracks = false;
   bool fillTracksCov = false;
   bool fillTracksDCA = false;
   bool fillTracksDCACov = false;
@@ -80,26 +98,67 @@ class TrackPropagationModule
 
   // pointers to objs needed for operation
   std::shared_ptr<TH1> trackTunedTracks;
-  TrackTuner trackTunerObj;
 
   // Running variables
-  std::array<float, 2> mDcaInfo;
+  std::array<float, 2> mDcaInfo{};
   o2::dataformats::DCA mDcaInfoCov;
   o2::dataformats::VertexBase mVtx;
   o2::track::TrackParametrization<float> mTrackPar;
   o2::track::TrackParametrizationWithError<float> mTrackParCov;
+  bool autoDetectDcaCalib = false; // track tuner setting
 
   template <typename TConfigurableGroup, typename TInitContext, typename THistoRegistry>
-  void init(TConfigurableGroup const& cGroup, THistoRegistry& registry, TInitContext& initContext)
+  void init(TConfigurableGroup const& cGroup, TrackTuner& trackTunerObj, THistoRegistry& registry, TInitContext& initContext)
   {
     // Checking if the tables are requested in the workflow and enabling them
+    fillTracks = isTableRequiredInWorkflow(initContext, "Tracks");
     fillTracksCov = isTableRequiredInWorkflow(initContext, "TracksCov");
     fillTracksDCA = isTableRequiredInWorkflow(initContext, "TracksDCA");
     fillTracksDCACov = isTableRequiredInWorkflow(initContext, "TracksDCACov");
 
+    // enable Tracks in case Tracks have been requested
+    if (fillTracksDCA && !fillTracks) {
+      LOGF(info, "******************************************************************");
+      LOGF(info, " There is no task subscribed to Tracks, but I have detected a");
+      LOGF(info, " subscription to TracksDCA. Now enabling tracks as algorithmic");
+      LOGF(info, " dependency. Note: please be sure this is intentional! For");
+      LOGF(info, " secondary analyses, the proper DCA to test against is the DCA");
+      LOGF(info, " that the V0 or Cascade is assigned to and not necessarily the");
+      LOGF(info, " the one that the Track is assigned to (if any). ");
+      LOGF(info, "******************************************************************");
+      fillTracks = true;
+    }
+
+    if (!fillTracks) {
+      LOGF(info, "Track propagation to PV not required. Suppressing all further processing and logs.");
+    }
+
+    LOGF(info, " Track propagation table detection results:");
+    if (fillTracks) {
+      LOGF(info, " ---> Will generate Tracks table.");
+    }
+    if (fillTracksCov) {
+      LOGF(info, " ---> Will generate TracksCov table.");
+    }
+    if (fillTracksDCA) {
+      LOGF(info, " ---> Will generate TracksDCA table.");
+    }
+    if (fillTracksDCACov) {
+      LOGF(info, " ---> Will generate TracksDCACov table.");
+    }
+    if (fillTracksCov) {
+      LOGF(info, "**************************************************************");
+      LOGF(info, " Warning: TracksCov has been requested due to a subscription!");
+      LOGF(info, " Please be mindful that generating track covariances requires");
+      LOGF(info, " a significant extra amount of CPU and memory. If not strictly");
+      LOGF(info, " necessary, requesting TracksCov should be avoided to save");
+      LOGF(info, " these additional resouces.");
+      LOGF(info, "**************************************************************");
+    }
+
     /// TrackTuner initialization
+    std::string outputStringParams = "";
     if (cGroup.useTrackTuner.value) {
-      std::string outputStringParams = "";
       switch (cGroup.trackTunerConfigSource.value) {
         case o2::aod::track_tuner::InputString:
           outputStringParams = trackTunerObj.configParams(cGroup.trackTunerParams.value);
@@ -113,10 +172,34 @@ class TrackPropagationModule
           break;
       }
 
-      trackTunerObj.getDcaGraphs();
+      /// read the track tuner instance configurations,
+      /// to understand whether the TrackTuner::getDcaGraphs function can be called here (input path from string/configurables)
+      /// or inside the process function, to "auto-detect" the input file based on the run number
+      const auto& workflows = initContext.services().template get<o2::framework::RunningWorkflowInfo const>();
+      for (const o2::framework::DeviceSpec& device : workflows.devices) { /// loop over devices
+        if (device.name == "propagation-service") {
+          // loop over the options
+          // to find the value of TrackTuner::autoDetectDcaCalib
+          for (const auto& option : device.options) { /// loop over options
+            if (option.name == "trackTuner.autoDetectDcaCalib") {
+              // found it!
+              autoDetectDcaCalib = option.defaultValue.get<bool>();
+              break;
+            }
+          } /// end loop over options
+          break;
+        }
+      } /// end loop over devices
+      LOG(info) << "[TrackPropagationModule]  trackTuner.autoDetectDcaCalib it's equal to " << autoDetectDcaCalib;
+      if (!autoDetectDcaCalib) {
+        LOG(info) << "[TrackPropagationModule]  retrieve the graphs already (we are in propagationService::Init() function)";
+        trackTunerObj.getDcaGraphs();
+      } else {
+        LOG(info) << "[TrackPropagationModule]  trackTunerObj.getDcaGraphs() function to be called later, in the process function!";
+      }
     }
 
-    trackTunedTracks = registry.template add<TH1>("trackTunedTracks", "trackTunedTracks", o2::framework::kTH1D, {{1, 0.5f, 1.5f}});
+    trackTunedTracks = registry.template add<TH1>("trackTunedTracks", outputStringParams.c_str(), o2::framework::kTH1D, {{1, 0.5f, 1.5f}});
 
     // Histograms for track tuner
     o2::framework::AxisSpec axisBinsDCA = {600, -0.15f, 0.15f, "#it{dca}_{xy} (cm)"};
@@ -127,8 +210,29 @@ class TrackPropagationModule
   }
 
   template <bool isMc, typename TConfigurableGroup, typename TCCDBLoader, typename TCollisions, typename TTracks, typename TOutputGroup, typename THistoRegistry>
-  void fillTrackTables(TConfigurableGroup const& cGroup, TCCDBLoader const& ccdbLoader, TCollisions const& collisions, TTracks const& tracks, TOutputGroup& cursors, THistoRegistry& registry)
+  void fillTrackTables(TConfigurableGroup const& cGroup, TrackTuner& trackTunerObj, TCCDBLoader const& ccdbLoader, TCollisions const& collisions, TTracks const& tracks, TOutputGroup& cursors, THistoRegistry& registry)
   {
+
+    /// retrieve the TrackTuner calibration graphs *if not done yet*
+    /// i.e. if autodetect is required
+    if (cGroup.useTrackTuner.value && autoDetectDcaCalib && !trackTunerObj.areGraphsConfigured) {
+
+      /// get the run number from the ccdb loader, already initialized
+      const int runNumber = ccdbLoader.runNumber;
+      trackTunerObj.setRunNumber(runNumber);
+
+      /// setup the "auto-detected" path based on the run number
+      trackTunerObj.getPathInputFileAutomaticFromCCDB();
+      trackTunedTracks->SetTitle(trackTunerObj.outputString.c_str());
+
+      /// now that the path is ok, retrieve the graphs
+      trackTunerObj.getDcaGraphs();
+    }
+
+    if (!fillTracks) {
+      return; // suppress everything
+    }
+
     if (fillTracksCov) {
       cursors.tracksParCovPropagated.reserve(tracks.size());
       cursors.tracksParCovExtensionPropagated.reserve(tracks.size());

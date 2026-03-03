@@ -16,18 +16,19 @@
 
 #include "TableHelper.h"
 
+#include "PWGLF/DataModel/LFPIDTOFGenericTables.h"
 #include "PWGLF/DataModel/Reduced3BodyTables.h"
-#include "PWGLF/DataModel/pidTOFGeneric.h"
+#include "PWGLF/Utils/pidTOFGeneric.h"
 
 #include "Common/Core/PID/PIDTOF.h"
 #include "Common/Core/RecoDecay.h"
+#include "Common/Core/Zorro.h"
+#include "Common/Core/ZorroSummary.h"
 #include "Common/Core/trackUtilities.h"
 #include "Common/DataModel/Centrality.h"
 #include "Common/DataModel/EventSelection.h"
 #include "Common/DataModel/Multiplicity.h"
-#include "Common/DataModel/PIDResponse.h"
-#include "EventFiltering/Zorro.h"
-#include "EventFiltering/ZorroSummary.h"
+#include "Common/DataModel/PIDResponseTPC.h"
 #include "Tools/KFparticle/KFUtilities.h"
 
 #include "CCDB/BasicCCDBManager.h"
@@ -64,6 +65,8 @@ using namespace o2;
 using namespace o2::framework;
 using namespace o2::framework::expressions;
 
+o2::common::core::MetadataHelper metadataInfo;
+
 using FullTracksExtIU = soa::Join<aod::TracksIU, aod::TracksExtra, aod::TracksCovIU>;
 using FullTracksExtPIDIU = soa::Join<FullTracksExtIU, aod::pidTPCFullPr, aod::pidTPCFullPi, aod::pidTPCFullDe>;
 
@@ -88,8 +91,7 @@ struct reduced3bodyCreator {
   o2::vertexing::DCAFitterN<3> fitter3body;
   o2::aod::pidtofgeneric::TofPidNewCollision<TrackExtPIDIUwithEvTimes::iterator> bachelorTOFPID;
 
-  Configurable<bool> doSel8selection{"doSel8selection", true, "flag for sel8 event selection"};
-  Configurable<bool> doPosZselection{"doPosZselection", true, "flag for posZ event selection"};
+  Configurable<bool> disableITSROFCut{"disableITSROFCut", false, "Disable ITS ROF border cut"};
   // CCDB options
   Configurable<std::string> ccdburl{"ccdb-url", "http://alice-ccdb.cern.ch", "url of the ccdb repository"};
   Configurable<std::string> grpPath{"grpPath", "GLO/GRP/GRP", "Path of the grp file"};
@@ -112,14 +114,16 @@ struct reduced3bodyCreator {
 
   int mRunNumber;
   float mBz;
-  o2::pid::tof::TOFResoParamsV2 mRespParamsV2;
+  // TOF response and input parameters
+  o2::pid::tof::TOFResoParamsV3 mRespParamsV3;
+  o2::aod::pidtofgeneric::TOFCalibConfig mTOFCalibConfig; // TOF Calib configuration
 
   // tracked cluster size
   std::vector<int> fTrackedClSizeVector;
 
   HistogramRegistry registry{"registry", {}};
 
-  void init(InitContext&)
+  void init(InitContext& initContext)
   {
     mRunNumber = 0;
     zorroSummary.setObject(zorro.getZorroSummary());
@@ -129,6 +133,11 @@ struct reduced3bodyCreator {
     ccdb->setCaching(true);
     ccdb->setLocalObjectValidityChecking();
     ccdb->setFatalWhenNull(false);
+
+    // TOF PID parameters initialization
+    mTOFCalibConfig.metadataInfo = metadataInfo;
+    mTOFCalibConfig.inheritFromBaseTask(initContext);
+    mTOFCalibConfig.initSetup(mRespParamsV3, ccdb);
 
     fitter3body.setPropagateToPCA(true);
     fitter3body.setMaxR(200.); //->maxRIni3body
@@ -142,11 +151,10 @@ struct reduced3bodyCreator {
 
     registry.add("hAllSelEventsVtxZ", "hAllSelEventsVtxZ", HistType::kTH1F, {{500, -15.0f, 15.0f, "PV Z (cm)"}});
 
-    auto hEventCounter = registry.add<TH1>("hEventCounter", "hEventCounter", HistType::kTH1D, {{4, 0.0f, 4.0f}});
-    hEventCounter->GetXaxis()->SetBinLabel(1, "total");
-    hEventCounter->GetXaxis()->SetBinLabel(2, "sel8");
-    hEventCounter->GetXaxis()->SetBinLabel(3, "vertexZ");
-    hEventCounter->GetXaxis()->SetBinLabel(4, "reduced");
+    auto hEventCounter = registry.add<TH1>("hEventCounter", "hEventCounter", HistType::kTH1D, {{3, 0.0f, 3.0f}});
+    hEventCounter->GetXaxis()->SetBinLabel(1, "all");
+    hEventCounter->GetXaxis()->SetBinLabel(2, "selected");
+    hEventCounter->GetXaxis()->SetBinLabel(3, "reduced");
     hEventCounter->LabelsOption("v");
 
     auto hEventCounterZorro = registry.add<TH1>("hEventCounterZorro", "hEventCounterZorro", HistType::kTH1D, {{2, 0, 2}});
@@ -172,7 +180,8 @@ struct reduced3bodyCreator {
 
     // In case override, don't proceed, please - no CCDB access required
     auto run3grp_timestamp = bc.timestamp();
-    o2::parameters::GRPMagField* grpmag = ccdb->getForTimeStamp<o2::parameters::GRPMagField>(grpmagPath, run3grp_timestamp);
+    ccdb->clearCache(grpmagPath);
+    o2::parameters::GRPMagField* grpmag = ccdb->getSpecific<o2::parameters::GRPMagField>(grpmagPath, run3grp_timestamp);
     if (!grpmag) {
       LOG(fatal) << "Got nullptr from CCDB for path " << grpmagPath << " of object GRPMagField and " << grpPath << " of object GRPObject for timestamp " << run3grp_timestamp;
     }
@@ -186,66 +195,8 @@ struct reduced3bodyCreator {
     KFParticle::SetField(mBz);
 #endif
 
-    // Initial TOF PID Paras, copied from PIDTOF.h
-    timestamp.value = bc.timestamp();
-    ccdb->setTimestamp(timestamp.value);
-    // Not later than now objects
-    ccdb->setCreatedNotAfter(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count());
-    // TODO: implement the automatic pass name detection from metadata
-    if (passName.value == "") {
-      passName.value = "unanchored"; // temporary default
-      LOG(warning) << "Passed autodetect mode for pass, not implemented yet, waiting for metadata. Taking '" << passName.value << "'";
-    }
-    LOG(info) << "Using parameter collection, starting from pass '" << passName.value << "'";
-
-    const std::string fname = paramFileName.value;
-    if (!fname.empty()) { // Loading the parametrization from file
-      LOG(info) << "Loading exp. sigma parametrization from file " << fname << ", using param: " << parametrizationPath.value;
-      if (1) {
-        o2::tof::ParameterCollection paramCollection;
-        paramCollection.loadParamFromFile(fname, parametrizationPath.value);
-        LOG(info) << "+++ Loaded parameter collection from file +++";
-        if (!paramCollection.retrieveParameters(mRespParamsV2, passName.value)) {
-          if (fatalOnPassNotAvailable) {
-            LOGF(fatal, "Pass '%s' not available in the retrieved CCDB object", passName.value.data());
-          } else {
-            LOGF(warning, "Pass '%s' not available in the retrieved CCDB object", passName.value.data());
-          }
-        } else {
-          mRespParamsV2.setShiftParameters(paramCollection.getPars(passName.value));
-          mRespParamsV2.printShiftParameters();
-        }
-      } else {
-        mRespParamsV2.loadParamFromFile(fname.data(), parametrizationPath.value);
-      }
-    } else if (loadResponseFromCCDB) { // Loading it from CCDB
-      LOG(info) << "Loading exp. sigma parametrization from CCDB, using path: " << parametrizationPath.value << " for timestamp " << timestamp.value;
-      o2::tof::ParameterCollection* paramCollection = ccdb->getForTimeStamp<o2::tof::ParameterCollection>(parametrizationPath.value, timestamp.value);
-      paramCollection->print();
-      if (!paramCollection->retrieveParameters(mRespParamsV2, passName.value)) { // Attempt at loading the parameters with the pass defined
-        if (fatalOnPassNotAvailable) {
-          LOGF(fatal, "Pass '%s' not available in the retrieved CCDB object", passName.value.data());
-        } else {
-          LOGF(warning, "Pass '%s' not available in the retrieved CCDB object", passName.value.data());
-        }
-      } else { // Pass is available, load non standard parameters
-        mRespParamsV2.setShiftParameters(paramCollection->getPars(passName.value));
-        mRespParamsV2.printShiftParameters();
-      }
-    }
-    mRespParamsV2.print();
-    if (timeShiftCCDBPath.value != "") {
-      if (timeShiftCCDBPath.value.find(".root") != std::string::npos) {
-        mRespParamsV2.setTimeShiftParameters(timeShiftCCDBPath.value, "gmean_Pos", true);
-        mRespParamsV2.setTimeShiftParameters(timeShiftCCDBPath.value, "gmean_Neg", false);
-      } else {
-        mRespParamsV2.setTimeShiftParameters(ccdb->getForTimeStamp<TGraph>(Form("%s/pos", timeShiftCCDBPath.value.c_str()), timestamp.value), true);
-        mRespParamsV2.setTimeShiftParameters(ccdb->getForTimeStamp<TGraph>(Form("%s/neg", timeShiftCCDBPath.value.c_str()), timestamp.value), false);
-      }
-    }
-
     fitter3body.setBz(mBz);
-    bachelorTOFPID.SetParams(mRespParamsV2);
+    mTOFCalibConfig.processSetup(mRespParamsV3, ccdb, bc);
   }
 
   //------------------------------------------------------------------
@@ -306,6 +257,14 @@ struct reduced3bodyCreator {
         lastRunNumber = bc.runNumber(); // Update the last run number
       }
 
+      // all events
+      registry.fill(HIST("hEventCounter"), 0.5);
+
+      // ITS ROF boarder cut if not disabled
+      if (!collision.selection_bit(aod::evsel::kNoITSROFrameBorder) && !disableITSROFCut) {
+        continue;
+      }
+
       // Zorro event counting
       bool isZorroSelected = false;
       if (cfgSkimmedProcessing) {
@@ -316,16 +275,13 @@ struct reduced3bodyCreator {
         }
       }
 
-      // Event selection
-      registry.fill(HIST("hEventCounter"), 0.5);
-      if (doSel8selection && !collision.sel8()) {
+      // event selection
+      if (!collision.selection_bit(aod::evsel::kIsTriggerTVX) || !collision.selection_bit(aod::evsel::kNoTimeFrameBorder) || (collision.posZ() >= 10.0f || collision.posZ() <= -10.0f)) {
         continue;
       }
+
+      // selected events
       registry.fill(HIST("hEventCounter"), 1.5);
-      if (doPosZselection && (collision.posZ() >= 10.0f || collision.posZ() <= -10.0f)) { // 10cm
-        continue;
-      }
-      registry.fill(HIST("hEventCounter"), 2.5);
       registry.fill(HIST("hAllSelEventsVtxZ"), collision.posZ());
 
       if (cfgSkimmedProcessing && isZorroSelected) {
@@ -347,19 +303,18 @@ struct reduced3bodyCreator {
 
       auto collision = d3body.template collision_as<ColwithEvTimesMultsCents>();
 
-      if (doSel8selection && !collision.sel8()) {
+      // event selection
+      if (!collision.selection_bit(aod::evsel::kNoITSROFrameBorder) && !disableITSROFCut) { // ITS ROF boarder cut if not disabled
         continue;
       }
-      if (doPosZselection && (collision.posZ() >= 10.0f || collision.posZ() <= -10.0f)) { // 10cm
+      if (!collision.selection_bit(aod::evsel::kIsTriggerTVX) || !collision.selection_bit(aod::evsel::kNoTimeFrameBorder) || (collision.posZ() >= 10.0f || collision.posZ() <= -10.0f)) {
         continue;
       }
 
       auto bc = collision.bc_as<aod::BCsWithTimestamps>();
       initCCDB(bc);
-      if (cfgSkimmedProcessing && cfgOnlyKeepInterestedTrigger) {
-        if (isTriggeredCollision[collision.globalIndex()] == false) {
-          continue;
-        }
+      if (cfgSkimmedProcessing && cfgOnlyKeepInterestedTrigger && !isTriggeredCollision[collision.globalIndex()]) {
+        continue;
       }
 
       // Save the collision
@@ -388,7 +343,7 @@ struct reduced3bodyCreator {
       // TOF PID of bachelor must be calcualted here
       // ----------------------------------------------
       auto originalcol = daughter2.template collision_as<ColwithEvTimesMultsCents>();
-      double tofNSigmaBach = bachelorTOFPID.GetTOFNSigma(daughter2, originalcol, collision);
+      double tofNSigmaBach = bachelorTOFPID.GetTOFNSigma(mRespParamsV3, daughter2, originalcol, collision);
       // ----------------------------------------------
 
       // -------- save reduced track table with decay3body daughters ----------
@@ -458,7 +413,7 @@ struct reduced3bodyCreator {
       reduced3BodyInfo(radius, phi, posZ, rVtx, phiVtx, zVtx, fTrackedClSizeVector[d3body.globalIndex()]);
     } // end decay3body loop
 
-    registry.fill(HIST("hEventCounter"), 3.5, reducedCollisions.lastIndex() + 1);
+    registry.fill(HIST("hEventCounter"), 2.5, reducedCollisions.lastIndex() + 1);
   }
 };
 
@@ -469,6 +424,7 @@ struct reduced3bodyInitializer {
 
 WorkflowSpec defineDataProcessing(ConfigContext const& cfgc)
 {
+  metadataInfo.initMetadata(cfgc);
   return WorkflowSpec{
     adaptAnalysisTask<reduced3bodyInitializer>(cfgc),
     adaptAnalysisTask<reduced3bodyCreator>(cfgc),

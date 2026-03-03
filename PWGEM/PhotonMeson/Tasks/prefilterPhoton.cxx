@@ -8,38 +8,49 @@
 // In applying this license CERN does not waive the privileges and immunities
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
-//
-// ========================
-//
-// This code produces information on prefilter for photon.
-//    Please write to: daiki.sekihata@cern.ch
 
-#include <string>
-#include <vector>
-#include <unordered_map>
-#include <map>
-#include <tuple>
+/// \file prefilterPhoton.cxx
+/// \brief This code produces information on prefilter for .
+/// \author D. Sekihata, daiki.sekihata@cern.ch
 
-// #include "TString.h"
-#include "Math/Vector4D.h"
-#include "Framework/runDataProcessing.h"
-#include "Framework/AnalysisTask.h"
-#include "Framework/ASoAHelpers.h"
-// #include "Common/Core/RecoDecay.h"
-#include "Common/Core/trackUtilities.h"
-
-#include "DetectorsBase/Propagator.h"
-#include "DetectorsBase/GeometryManager.h"
-#include "DataFormatsParameters/GRPObject.h"
-#include "DataFormatsParameters/GRPMagField.h"
-#include "CCDB/BasicCCDBManager.h"
-
+#include "PWGEM/Dilepton/Utils/PairUtilities.h"
+#include "PWGEM/PhotonMeson/Core/DalitzEECut.h"
+#include "PWGEM/PhotonMeson/Core/EMPhotonEventCut.h"
+#include "PWGEM/PhotonMeson/Core/V0PhotonCut.h"
 #include "PWGEM/PhotonMeson/DataModel/gammaTables.h"
 #include "PWGEM/PhotonMeson/Utils/PairUtilities.h"
-#include "PWGEM/PhotonMeson/Core/V0PhotonCut.h"
-#include "PWGEM/PhotonMeson/Core/EMPhotonEventCut.h"
-#include "PWGEM/PhotonMeson/Core/DalitzEECut.h"
-#include "PWGEM/Dilepton/Utils/PairUtilities.h"
+
+#include "Common/DataModel/Centrality.h"
+#include "Common/DataModel/EventSelection.h"
+
+#include <CCDB/BasicCCDBManager.h>
+#include <CCDB/CcdbApi.h>
+#include <CommonConstants/MathConstants.h>
+#include <CommonConstants/PhysicsConstants.h>
+#include <DataFormatsParameters/GRPMagField.h>
+#include <DataFormatsParameters/GRPObject.h>
+#include <DetectorsBase/Propagator.h>
+#include <Framework/ASoA.h>
+#include <Framework/ASoAHelpers.h>
+#include <Framework/AnalysisHelpers.h>
+#include <Framework/AnalysisTask.h>
+#include <Framework/Configurable.h>
+#include <Framework/Expressions.h>
+#include <Framework/HistogramRegistry.h>
+#include <Framework/HistogramSpec.h>
+#include <Framework/InitContext.h>
+#include <Framework/OutputObjHeader.h>
+#include <Framework/SliceCache.h>
+#include <Framework/runDataProcessing.h>
+
+#include <Math/Vector4D.h> // IWYU pragma: keep
+#include <Math/Vector4Dfwd.h>
+
+#include <cmath>
+#include <cstdint>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
 using namespace o2;
 using namespace o2::aod;
@@ -48,13 +59,13 @@ using namespace o2::framework::expressions;
 using namespace o2::soa;
 using namespace o2::aod::pwgem::photonmeson::photonpair;
 
-using MyCollisions = soa::Join<aod::EMEvents, aod::EMEventsCent>;
+using MyCollisions = soa::Join<aod::EMEvents_004, aod::EMEventsAlias, aod::EMEventsCent_000>;
 using MyCollision = MyCollisions::iterator;
 
-using MyV0Photons = soa::Join<aod::V0PhotonsKF, aod::V0PhotonsKFCov, aod::V0KFEMEventIds>;
+using MyV0Photons = soa::Join<aod::V0PhotonsKF, aod::V0KFEMEventIds>;
 using MyV0Photon = MyV0Photons::iterator;
 
-using MyPrimaryElectrons = soa::Join<aod::EMPrimaryElectronsFromDalitz, aod::EMPrimaryElectronEMEventIds>;
+using MyPrimaryElectrons = soa::Join<aod::EMPrimaryElectronsFromDalitz, aod::EMPrimaryElectronDaEMEventIds>;
 using MyPrimaryElectron = MyPrimaryElectrons::iterator;
 
 struct prefilterPhoton {
@@ -103,7 +114,6 @@ struct prefilterPhoton {
     Configurable<float> cfg_min_cospa{"cfg_min_cospa", 0.99, "min V0 CosPA"};
     Configurable<float> cfg_max_pca{"cfg_max_pca", 1.5, "max distance btween 2 legs"};
     Configurable<float> cfg_max_chi2kf{"cfg_max_chi2kf", 1e+10, "max chi2/ndf with KF"};
-    Configurable<bool> cfg_require_v0_with_correct_xz{"cfg_require_v0_with_correct_xz", false, "flag to select V0s with correct xz"};
     Configurable<bool> cfg_reject_v0_on_itsib{"cfg_reject_v0_on_itsib", true, "flag to reject V0s on ITSib"};
     Configurable<int> cfg_min_ncluster_tpc{"cfg_min_ncluster_tpc", 0, "min ncluster tpc"};
     Configurable<int> cfg_min_ncrossedrows{"cfg_min_ncrossedrows", 40, "min ncrossed rows"};
@@ -231,12 +241,12 @@ struct prefilterPhoton {
   {
     const AxisSpec axis_mass{200, 0, 0.8, "m_{#gamma#gamma} (GeV/c^{2})"};
     const AxisSpec axis_pair_pt{100, 0, 10, "p_{T,#gamma#gamma} (GeV/c)"};
-    const AxisSpec axis_phiv{180, 0, M_PI, "#varphi_{V} (rad.)"};
+    const AxisSpec axis_phiv{180, 0, o2::constants::math::PI, "#varphi_{V} (rad.)"};
 
     // for pair
     fRegistry.add("Pair/PCMPCM/before/hMvsPt", "m_{#gamma#gamma} vs. p_{T,#gamma#gamma}", kTH2D, {axis_mass, axis_pair_pt}, true);
     fRegistry.add("Pair/PCMDalitzEE/before/hMvsPt", "m_{ee#gamma} vs. p_{T,ee#gamma}", kTH2D, {axis_mass, axis_pair_pt}, true);
-    fRegistry.add("Pair/PCMDalitzEE/before/hMvsPhiV", "m_{ee} vs. #varphi_{V}", kTH2D, {{180, 0, M_PI}, {100, 0, 0.1}}, true);
+    fRegistry.add("Pair/PCMDalitzEE/before/hMvsPhiV", "m_{ee} vs. #varphi_{V}", kTH2D, {{180, 0, o2::constants::math::PI}, {100, 0, 0.1}}, true);
     fRegistry.addClone("Pair/PCMPCM/before/", "Pair/PCMPCM/after/");
     fRegistry.addClone("Pair/PCMDalitzEE/before/", "Pair/PCMDalitzEE/after/");
   }
@@ -280,7 +290,6 @@ struct prefilterPhoton {
 
     fV0PhotonCut.SetNClustersITS(0, 7);
     fV0PhotonCut.SetMeanClusterSizeITSob(0.0, 16.0);
-    fV0PhotonCut.SetIsWithinBeamPipe(pcmcuts.cfg_require_v0_with_correct_xz);
   }
 
   void DefineDileptonCut()
@@ -354,7 +363,7 @@ struct prefilterPhoton {
           continue;
         }
         for (const auto& [g1, g2] : combinations(CombinationsStrictlyUpperIndexPolicy(photons1_per_collision, photons2_per_collision))) {
-          if (!cut1.template IsSelected<TSubInfos1>(g1) || !cut2.template IsSelected<TSubInfos2>(g2)) {
+          if (!cut1.template IsSelected<decltype(g1), TSubInfos1>(g1) || !cut2.template IsSelected<decltype(g2), TSubInfos2>(g2)) {
             continue;
           }
           // don't apply pair cut when you produce prefilter bit.
@@ -380,8 +389,8 @@ struct prefilterPhoton {
         }
 
         auto photons1_per_collision = photons1.sliceBy(perCollision1, collision.globalIndex());
-        auto positrons_per_collision = posTracks->sliceByCached(o2::aod::emprimaryelectron::emeventId, collision.globalIndex(), cache);
-        auto electrons_per_collision = negTracks->sliceByCached(o2::aod::emprimaryelectron::emeventId, collision.globalIndex(), cache);
+        auto positrons_per_collision = posTracks->sliceByCached(o2::aod::emprimaryelectronda::emphotoneventId, collision.globalIndex(), cache);
+        auto electrons_per_collision = negTracks->sliceByCached(o2::aod::emprimaryelectronda::emphotoneventId, collision.globalIndex(), cache);
 
         if (!fEMEventCut.IsSelected(collision) || !is_cent_ok) {
           for (const auto& photon1 : photons1_per_collision) {
@@ -397,7 +406,7 @@ struct prefilterPhoton {
         }
 
         for (const auto& [g1, g2] : combinations(CombinationsStrictlyUpperIndexPolicy(photons1_per_collision, photons1_per_collision))) { // PCM-PCM // cut, and subinfo is different from kPCMPCM
-          if (!cut1.template IsSelected<TSubInfos1>(g1) || !cut1.template IsSelected<TSubInfos1>(g2)) {
+          if (!cut1.template IsSelected<decltype(g1), TSubInfos1>(g1) || !cut1.template IsSelected<decltype(g2), TSubInfos1>(g2)) {
             continue;
           }
           // don't apply pair cut when you produce prefilter bit.
@@ -414,7 +423,7 @@ struct prefilterPhoton {
         } // end of 2photon pairing loop
 
         for (const auto& g1 : photons1_per_collision) { // PCM-DalitzEE
-          if (!cut1.template IsSelected<TSubInfos1>(g1)) {
+          if (!cut1.template IsSelected<decltype(g1), TSubInfos1>(g1)) {
             continue;
           }
           auto pos1 = g1.template posTrack_as<TSubInfos1>();
@@ -502,7 +511,7 @@ struct prefilterPhoton {
         auto photons2_per_collision = photons2.sliceBy(perCollision2, collision.globalIndex());
 
         for (const auto& [g1, g2] : combinations(CombinationsStrictlyUpperIndexPolicy(photons1_per_collision, photons2_per_collision))) {
-          if (!cut1.template IsSelected<TSubInfos1>(g1) || !cut2.template IsSelected<TSubInfos2>(g2)) {
+          if (!cut1.template IsSelected<decltype(g1), TSubInfos1>(g1) || !cut2.template IsSelected<decltype(g2), TSubInfos2>(g2)) {
             continue;
           }
           if (map_pfb_v0[g1.globalIndex()] != 0 || map_pfb_v0[g2.globalIndex()] != 0) {
@@ -528,11 +537,11 @@ struct prefilterPhoton {
         }
 
         auto photons1_per_collision = photons1.sliceBy(perCollision1, collision.globalIndex());
-        auto positrons_per_collision = posTracks->sliceByCached(o2::aod::emprimaryelectron::emeventId, collision.globalIndex(), cache);
-        auto electrons_per_collision = negTracks->sliceByCached(o2::aod::emprimaryelectron::emeventId, collision.globalIndex(), cache);
+        auto positrons_per_collision = posTracks->sliceByCached(o2::aod::emprimaryelectronda::emphotoneventId, collision.globalIndex(), cache);
+        auto electrons_per_collision = negTracks->sliceByCached(o2::aod::emprimaryelectronda::emphotoneventId, collision.globalIndex(), cache);
 
         for (const auto& [g1, g2] : combinations(CombinationsStrictlyUpperIndexPolicy(photons1_per_collision, photons1_per_collision))) {
-          if (!cut1.template IsSelected<TSubInfos1>(g1) || !cut1.template IsSelected<TSubInfos1>(g2)) {
+          if (!cut1.template IsSelected<decltype(g1), TSubInfos1>(g1) || !cut1.template IsSelected<decltype(g2), TSubInfos1>(g2)) {
             continue;
           }
           if (map_pfb_v0[g1.globalIndex()] != 0 || map_pfb_v0[g2.globalIndex()] != 0) {
@@ -546,7 +555,7 @@ struct prefilterPhoton {
         }
 
         for (const auto& g1 : photons1_per_collision) {
-          if (!cut1.template IsSelected<TSubInfos1>(g1)) {
+          if (!cut1.template IsSelected<decltype(g1), TSubInfos1>(g1)) {
             continue;
           }
           auto pos1 = g1.template posTrack_as<TSubInfos1>();
@@ -591,8 +600,8 @@ struct prefilterPhoton {
   std::unordered_map<int, uint16_t> map_pfb_ele; // map ele.globalIndex -> prefilter bit
 
   SliceCache cache;
-  Preslice<MyV0Photons> perCollision_v0 = aod::v0photonkf::emeventId;
-  Preslice<MyPrimaryElectrons> perCollision_electron = aod::emprimaryelectron::emeventId;
+  Preslice<MyV0Photons> perCollision_v0 = aod::v0photonkf::emphotoneventId;
+  Preslice<MyPrimaryElectrons> perCollision_electron = aod::emprimaryelectronda::emphotoneventId;
 
   Filter collisionFilter_centrality = (cfgCentMin < o2::aod::cent::centFT0M && o2::aod::cent::centFT0M < cfgCentMax) || (cfgCentMin < o2::aod::cent::centFT0A && o2::aod::cent::centFT0A < cfgCentMax) || (cfgCentMin < o2::aod::cent::centFT0C && o2::aod::cent::centFT0C < cfgCentMax);
   Filter collisionFilter_occupancy_track = eventcuts.cfgTrackOccupancyMin <= o2::aod::evsel::trackOccupancyInTimeRange && o2::aod::evsel::trackOccupancyInTimeRange < eventcuts.cfgTrackOccupancyMax;

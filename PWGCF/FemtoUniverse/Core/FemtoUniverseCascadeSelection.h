@@ -21,14 +21,17 @@
 #ifndef PWGCF_FEMTOUNIVERSE_CORE_FEMTOUNIVERSECASCADESELECTION_H_
 #define PWGCF_FEMTOUNIVERSE_CORE_FEMTOUNIVERSECASCADESELECTION_H_
 
-#include <string>
-#include <vector>
 #include "PWGCF/FemtoUniverse/Core/FemtoUniverseObjectSelection.h"
 #include "PWGCF/FemtoUniverse/Core/FemtoUniverseSelection.h"
 #include "PWGCF/FemtoUniverse/Core/FemtoUniverseTrackSelection.h"
+
 #include "Common/Core/RecoDecay.h"
+
 #include "Framework/HistogramRegistry.h"
 #include "ReconstructionDataFormats/PID.h"
+
+#include <string>
+#include <vector>
 
 namespace o2::analysis::femto_universe
 {
@@ -252,9 +255,9 @@ class FemtoUniverseCascadeSelection
       femto_universe_selection::kLowerLimit, // cascade tran rad min
       femto_universe_selection::kUpperLimit, // cascade tran rad max
       femto_universe_selection::kUpperLimit, // cascade maximum distance of decay vertex to PV
-      femto_universe_selection::kLowerLimit, // DCA pos to PV max
-      femto_universe_selection::kLowerLimit, // DCA neg to PV max
-      femto_universe_selection::kLowerLimit, // DCA bach to PV max
+      femto_universe_selection::kLowerLimit, // DCA pos to PV min
+      femto_universe_selection::kLowerLimit, // DCA neg to PV min
+      femto_universe_selection::kLowerLimit, // DCA bach to PV min
       femto_universe_selection::kLowerLimit, // DCA v0 to PV max
       femto_universe_selection::kLowerLimit, // v0 mass min
       femto_universe_selection::kUpperLimit, // v0 mass max
@@ -276,10 +279,10 @@ class FemtoUniverseCascadeSelection
     "Minimum cascade transverse radius (cm)",
     "Maximum cascade transverse radius (cm)",
     "Maximum distance of cascade from primary vertex",
-    "Maximum DCA of positive track form primary vertex",
-    "Maximum DCA of negative track form primary vertex",
-    "Maximum DCA of bachelor track form primary vertex",
-    "Maximum DCA of v0 form primary vertex",
+    "Minimum DCA of positive track form primary vertex",
+    "Minimum DCA of negative track form primary vertex",
+    "Minimum DCA of bachelor track form primary vertex",
+    "Minimum DCA of v0 form primary vertex",
     "Minimum V0 mass",
     "Maximum V0 mass"}; ///< Helper information for the
                         ///< different selections
@@ -314,11 +317,11 @@ void FemtoUniverseCascadeSelection::init(HistogramRegistry* registry)
                     "container - quitting!";
     }
 
-    posDaughTrack.init<aod::femtouniverseparticle::ParticleType::kV0Child,
+    posDaughTrack.init<aod::femtouniverseparticle::ParticleType::kCascadeV0Child,
                        aod::femtouniverseparticle::TrackType::kPosChild,
                        aod::femtouniverseparticle::CutContainerType>(
       mHistogramRegistry);
-    negDaughTrack.init<aod::femtouniverseparticle::ParticleType::kV0Child,
+    negDaughTrack.init<aod::femtouniverseparticle::ParticleType::kCascadeV0Child,
                        aod::femtouniverseparticle::TrackType::kNegChild,
                        aod::femtouniverseparticle::CutContainerType>(
       mHistogramRegistry);
@@ -577,9 +580,9 @@ void FemtoUniverseCascadeSelection::fillCascadeQA(Col const& col, Casc const& ca
 template <typename Col, typename Casc, typename Track>
 void FemtoUniverseCascadeSelection::fillQA(Col const& /*col*/, Casc const& /*cascade*/, Track const& posTrack, Track const& negTrack, Track const& bachTrack)
 {
-  posDaughTrack.fillQA<aod::femtouniverseparticle::ParticleType::kV0Child,
+  posDaughTrack.fillQA<aod::femtouniverseparticle::ParticleType::kCascadeV0Child,
                        aod::femtouniverseparticle::TrackType::kPosChild>(posTrack);
-  negDaughTrack.fillQA<aod::femtouniverseparticle::ParticleType::kV0Child,
+  negDaughTrack.fillQA<aod::femtouniverseparticle::ParticleType::kCascadeV0Child,
                        aod::femtouniverseparticle::TrackType::kNegChild>(negTrack);
   bachTrackSel.fillQA<aod::femtouniverseparticle::ParticleType::kCascadeBachelor,
                       aod::femtouniverseparticle::TrackType::kBachelor>(bachTrack);

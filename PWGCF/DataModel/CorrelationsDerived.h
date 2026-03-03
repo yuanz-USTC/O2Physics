@@ -86,6 +86,25 @@ using CFTrackWithLabel = CFTracksWithLabel::iterator;
 //------transient CF-filter to CF-2prong-filter
 DECLARE_SOA_TABLE(CFCollRefs, "AOD", "CFCOLLREF", o2::soa::Index<>, track::CollisionId); //! Transient cf collision index table
 
+//------multiplicity set
+namespace cfmultset
+{
+DECLARE_SOA_COLUMN(Multiplicities, multiplicities, std::vector<float>); //! List of auxiliary multiplicities
+enum MultiplicityEstimators : uint8_t {
+  CentFT0C = 0x1,
+  MultFV0A = 0x2,
+  MultNTracksPV = 0x4,
+  MultNTracksGlobal = 0x8,
+  CentFT0M = 0x10,
+};
+
+inline constexpr uint32_t NMultiplicityEstimators = __builtin_ctz(CentFT0M) + 1;
+
+} // namespace cfmultset
+DECLARE_SOA_TABLE(CFMultSets, "AOD", "CFMULTSET", cfmultset::Multiplicities); //! Auxilary multiplicity set table
+
+using CFMultSet = CFMultSets::iterator;
+
 // Reco
 
 using CFCollRef = CFCollRefs::iterator;
@@ -120,14 +139,25 @@ DECLARE_SOA_COLUMN(InvMass, invMass, float);                                    
 DECLARE_SOA_COLUMN(Decay, decay, uint8_t);                                        //! Particle decay
 enum ParticleDecay {
   D0ToPiK,
-  D0barToKPi,
+  D0barToKPi, // note: often duplicate to D0ToPiK. Choose D0barToKPiExclusive to select uniquely reconstructed D0bars
   JPsiToEE,
   JPsiToMuMu,
   Generic2Prong,
-  PhiToKK,
+  PhiToKKPID1,
+  PhiToKKPID2,
+  PhiToKKPID3,
+  PhiToKKPID3Loose,
+  PhiToKKPID3Tight,
   K0stoPiPi,
   LambdatoPPi,
-  AntiLambdatoPiP
+  AntiLambdatoPiP,
+  K0stoPiPiLoose,
+  K0stoPiPiTight,
+  LambdaToPPiLoose,
+  LambdaToPPiTight,
+  AntiLambdaToPiPLoose,
+  AntiLambdaToPiPTight,
+  D0barToKPiExclusive
 };
 } // namespace cf2prongtrack
 DECLARE_SOA_TABLE(CF2ProngTracks, "AOD", "CF2PRONGTRACK", //! Reduced track table

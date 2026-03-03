@@ -10,46 +10,49 @@
 // or submit itself to any jurisdiction.
 
 /// \file   flowCumulantsUpc.cxx
-/// \author Mingrui Zhao (mingrui.zhao@mail.labz0.org, mingrui.zhao@cern.ch)
+/// \author Yongxi Du (yongxi.du@cern.ch), Mingrui Zhao (mingrui.zhao@mail.labz0.org, mingrui.zhao@cern.ch)
 /// \since  Mar/2025
 /// \brief  jira: , task to measure flow observables with cumulant method
 
-#include <CCDB/BasicCCDBManager.h>
-#include <cmath>
-#include <vector>
-#include <array>
-#include <unordered_map>
-#include <string>
-#include <memory>
-#include "Framework/runDataProcessing.h"
-#include "Framework/AnalysisTask.h"
-#include "Framework/ASoAHelpers.h"
-#include "Framework/RunningWorkflowInfo.h"
-#include "Framework/HistogramRegistry.h"
-
-#include "Common/DataModel/EventSelection.h"
-#include "Common/Core/TrackSelection.h"
-#include "Common/Core/TrackSelectionDefaults.h"
-#include "Common/Core/RecoDecay.h"
-#include "Common/DataModel/TrackSelectionTables.h"
-#include "Common/DataModel/Centrality.h"
-#include "Common/DataModel/Multiplicity.h"
-#include "Common/CCDB/ctpRateFetcher.h"
-
-#include "PWGUD/DataModel/UDTables.h"
-#include "PWGUD/Core/SGSelector.h"
-#include "TVector3.h"
-
-#include "GFWPowerArray.h"
+#include "FlowContainer.h"
 #include "GFW.h"
 #include "GFWCumulant.h"
+#include "GFWPowerArray.h"
 #include "GFWWeights.h"
-#include "FlowContainer.h"
+
+#include "PWGUD/Core/SGSelector.h"
+#include "PWGUD/DataModel/SGTables.h"
+#include "PWGUD/DataModel/UDTables.h"
+
+#include "Common/CCDB/ctpRateFetcher.h"
+#include "Common/Core/RecoDecay.h"
+#include "Common/Core/TrackSelection.h"
+#include "Common/Core/TrackSelectionDefaults.h"
+#include "Common/DataModel/Centrality.h"
+#include "Common/DataModel/EventSelection.h"
+#include "Common/DataModel/Multiplicity.h"
+#include "Common/DataModel/TrackSelectionTables.h"
+
+#include "Framework/ASoAHelpers.h"
+#include "Framework/AnalysisTask.h"
+#include "Framework/HistogramRegistry.h"
+#include "Framework/RunningWorkflowInfo.h"
+#include "Framework/runDataProcessing.h"
+#include <CCDB/BasicCCDBManager.h>
+
 #include "TList.h"
+#include "TVector3.h"
+#include <TF1.h>
+#include <TObjArray.h>
 #include <TProfile.h>
 #include <TRandom3.h>
-#include <TObjArray.h>
-#include <TF1.h>
+
+#include <array>
+#include <cmath>
+#include <memory>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
 using namespace o2;
 using namespace o2::framework;
@@ -60,14 +63,15 @@ using namespace o2::framework::expressions;
 struct FlowCumulantsUpc {
 
   O2_DEFINE_CONFIGURABLE(cfgCutVertex, float, 10.0f, "Accepted z-vertex range")
+  O2_DEFINE_CONFIGURABLE(cfgIfVertex, bool, false, "choose vertex or not")
   O2_DEFINE_CONFIGURABLE(cfgCentEstimator, int, 0, "0:FT0C; 1:FT0CVariant1; 2:FT0M; 3:FT0A")
   O2_DEFINE_CONFIGURABLE(cfgCentFT0CMin, float, 0.0f, "Minimum centrality (FT0C) to cut events in filter")
   O2_DEFINE_CONFIGURABLE(cfgCentFT0CMax, float, 100.0f, "Maximum centrality (FT0C) to cut events in filter")
-  O2_DEFINE_CONFIGURABLE(cfgCutPtPOIMin, float, 0.2f, "Minimal pT for poi tracks")
+  O2_DEFINE_CONFIGURABLE(cfgCutPtPOIMin, float, 0.1f, "Minimal pT for poi tracks")
   O2_DEFINE_CONFIGURABLE(cfgCutPtPOIMax, float, 10.0f, "Maximal pT for poi tracks")
-  O2_DEFINE_CONFIGURABLE(cfgCutPtRefMin, float, 0.2f, "Minimal pT for ref tracks")
+  O2_DEFINE_CONFIGURABLE(cfgCutPtRefMin, float, 0.1f, "Minimal pT for ref tracks")
   O2_DEFINE_CONFIGURABLE(cfgCutPtRefMax, float, 3.0f, "Maximal pT for ref tracks")
-  O2_DEFINE_CONFIGURABLE(cfgCutPtMin, float, 0.2f, "Minimal pT for all tracks")
+  O2_DEFINE_CONFIGURABLE(cfgCutPtMin, float, 0.1f, "Minimal pT for all tracks")
   O2_DEFINE_CONFIGURABLE(cfgCutPtMax, float, 10.0f, "Maximal pT for all tracks")
   O2_DEFINE_CONFIGURABLE(cfgCutEta, float, 0.8f, "Eta range for tracks")
   O2_DEFINE_CONFIGURABLE(cfgCutChi2prTPCcls, float, 2.5f, "max chi2 per TPC clusters")
@@ -75,22 +79,22 @@ struct FlowCumulantsUpc {
   O2_DEFINE_CONFIGURABLE(cfgCutITSclu, float, 5.0f, "minimum ITS clusters")
   O2_DEFINE_CONFIGURABLE(cfgCutDCAz, float, 2.0f, "max DCA to vertex z")
   O2_DEFINE_CONFIGURABLE(cfgCutDCAxyppPass3Enabled, bool, false, "switch of ppPass3 DCAxy pt dependent cut")
-  O2_DEFINE_CONFIGURABLE(cfgCutDCAzPtDepEnabled, bool, false, "switch of DCAz pt dependent cut")
-  O2_DEFINE_CONFIGURABLE(cfgTrkSelSwitch, bool, false, "switch for self-defined track selection")
-  O2_DEFINE_CONFIGURABLE(cfgUseAdditionalEventCut, bool, false, "Use additional event cut on mult correlations")
-  O2_DEFINE_CONFIGURABLE(cfgUseTentativeEventCounter, bool, false, "After sel8(), count events regardless of real event selection")
-  O2_DEFINE_CONFIGURABLE(cfgEvSelkNoSameBunchPileup, bool, false, "rejects collisions which are associated with the same found-by-T0 bunch crossing")
-  O2_DEFINE_CONFIGURABLE(cfgEvSelkIsGoodZvtxFT0vsPV, bool, false, "removes collisions with large differences between z of PV by tracks and z of PV from FT0 A-C time difference, use this cut at low multiplicities with caution")
-  O2_DEFINE_CONFIGURABLE(cfgEvSelkNoCollInTimeRangeStandard, bool, false, "no collisions in specified time range")
-  O2_DEFINE_CONFIGURABLE(cfgEvSelkIsGoodITSLayersAll, bool, true, "cut time intervals with dead ITS staves")
-  O2_DEFINE_CONFIGURABLE(cfgEvSelkNoCollInRofStandard, bool, false, "no other collisions in this Readout Frame with per-collision multiplicity above threshold")
-  O2_DEFINE_CONFIGURABLE(cfgEvSelkNoHighMultCollInPrevRof, bool, false, "veto an event if FT0C amplitude in previous ITS ROF is above threshold")
-  O2_DEFINE_CONFIGURABLE(cfgEvSelMultCorrelation, bool, true, "Multiplicity correlation cut")
-  O2_DEFINE_CONFIGURABLE(cfgEvSelV0AT0ACut, bool, true, "V0A T0A 5 sigma cut")
-  O2_DEFINE_CONFIGURABLE(cfgGetInteractionRate, bool, false, "Get interaction rate from CCDB")
-  O2_DEFINE_CONFIGURABLE(cfgUseInteractionRateCut, bool, false, "Use events with low interaction rate")
-  O2_DEFINE_CONFIGURABLE(cfgCutMaxIR, float, 50.0f, "maximum interaction rate (kHz)")
-  O2_DEFINE_CONFIGURABLE(cfgCutMinIR, float, 0.0f, "minimum interaction rate (kHz)")
+  // O2_DEFINE_CONFIGURABLE(cfgCutDCAzPtDepEnabled, bool, false, "switch of DCAz pt dependent cut")
+  // O2_DEFINE_CONFIGURABLE(cfgTrkSelSwitch, bool, false, "switch for self-defined track selection")
+  // O2_DEFINE_CONFIGURABLE(cfgUseAdditionalEventCut, bool, false, "Use additional event cut on mult correlations")
+  // O2_DEFINE_CONFIGURABLE(cfgUseTentativeEventCounter, bool, false, "After sel8(), count events regardless of real event selection")
+  // O2_DEFINE_CONFIGURABLE(cfgEvSelkNoSameBunchPileup, bool, false, "rejects collisions which are associated with the same found-by-T0 bunch crossing")
+  // O2_DEFINE_CONFIGURABLE(cfgEvSelkIsGoodZvtxFT0vsPV, bool, false, "removes collisions with large differences between z of PV by tracks and z of PV from FT0 A-C time difference, use this cut at low multiplicities with caution")
+  // O2_DEFINE_CONFIGURABLE(cfgEvSelkNoCollInTimeRangeStandard, bool, false, "no collisions in specified time range")
+  // O2_DEFINE_CONFIGURABLE(cfgEvSelkIsGoodITSLayersAll, bool, true, "cut time intervals with dead ITS staves")
+  // O2_DEFINE_CONFIGURABLE(cfgEvSelkNoCollInRofStandard, bool, false, "no other collisions in this Readout Frame with per-collision multiplicity above threshold")
+  // O2_DEFINE_CONFIGURABLE(cfgEvSelkNoHighMultCollInPrevRof, bool, false, "veto an event if FT0C amplitude in previous ITS ROF is above threshold")
+  // O2_DEFINE_CONFIGURABLE(cfgEvSelMultCorrelation, bool, true, "Multiplicity correlation cut")
+  // O2_DEFINE_CONFIGURABLE(cfgEvSelV0AT0ACut, bool, true, "V0A T0A 5 sigma cut")
+  // O2_DEFINE_CONFIGURABLE(cfgGetInteractionRate, bool, false, "Get interaction rate from CCDB")
+  // O2_DEFINE_CONFIGURABLE(cfgUseInteractionRateCut, bool, false, "Use events with low interaction rate")
+  // O2_DEFINE_CONFIGURABLE(cfgCutMaxIR, float, 50.0f, "maximum interaction rate (kHz)")
+  // O2_DEFINE_CONFIGURABLE(cfgCutMinIR, float, 0.0f, "minimum interaction rate (kHz)")
   O2_DEFINE_CONFIGURABLE(cfgUseNch, bool, false, "Use Nch for flow observables")
   O2_DEFINE_CONFIGURABLE(cfgNbootstrap, int, 30, "Number of subsamples")
   O2_DEFINE_CONFIGURABLE(cfgOutputNUAWeights, bool, false, "Fill and output NUA weights")
@@ -100,9 +104,17 @@ struct FlowCumulantsUpc {
   O2_DEFINE_CONFIGURABLE(cfgAcceptanceList, std::string, "", "CCDB path to acceptance lsit object")
   O2_DEFINE_CONFIGURABLE(cfgAcceptanceListEnabled, bool, false, "switch of acceptance list")
   O2_DEFINE_CONFIGURABLE(cfgEvSelOccupancy, bool, true, "Occupancy cut")
-  O2_DEFINE_CONFIGURABLE(cfgCutOccupancyHigh, int, 500, "High cut on TPC occupancy")
+  O2_DEFINE_CONFIGURABLE(cfgCutOccupancyHigh, int, 1000, "High cut on TPC occupancy")
   O2_DEFINE_CONFIGURABLE(cfgCutOccupancyLow, int, 0, "Low cut on TPC occupancy")
   O2_DEFINE_CONFIGURABLE(cfgUseSmallMemory, bool, false, "Use small memory mode")
+  O2_DEFINE_CONFIGURABLE(cfgIsGoodItsLayers, bool, false, "whether choose itslayers")
+  O2_DEFINE_CONFIGURABLE(cfgGapSideA, bool, true, "choose gapside A")
+  O2_DEFINE_CONFIGURABLE(cfgGapSideC, bool, false, "choose gapside C")
+  O2_DEFINE_CONFIGURABLE(cfgDcaxy, bool, true, "choose dcaxy")
+  O2_DEFINE_CONFIGURABLE(cfgDcaz, bool, false, "choose dcaz")
+  O2_DEFINE_CONFIGURABLE(cfgDcazCut, float, 10.0, "dcaz cut")
+  O2_DEFINE_CONFIGURABLE(cfgItsClusterSize, unsigned int, 5, "ITS cluster size")
+  O2_DEFINE_CONFIGURABLE(cfgMaxTPCChi2NCl, int, 4, "tpcchi2")
   Configurable<std::vector<std::string>> cfgUserDefineGFWCorr{"cfgUserDefineGFWCorr", std::vector<std::string>{"refN02 {2} refP02 {-2}", "refN12 {2} refP12 {-2}"}, "User defined GFW CorrelatorConfig"};
   Configurable<std::vector<std::string>> cfgUserDefineGFWName{"cfgUserDefineGFWName", std::vector<std::string>{"Ch02Gap22", "Ch12Gap22"}, "User defined GFW Name"};
   Configurable<std::vector<int>> cfgRunRemoveList{"cfgRunRemoveList", std::vector<int>{-1}, "excluded run numbers"};
@@ -120,10 +132,6 @@ struct FlowCumulantsUpc {
   Configurable<float> cfgCutFT0A{"cfgCutFT0A", 150., "FT0A threshold"};
   Configurable<float> cfgCutFT0C{"cfgCutFT0C", 50., "FT0C threshold"};
   Configurable<float> cfgCutZDC{"cfgCutZDC", 10., "ZDC threshold"};
-  Configurable<float> cfgGapSideSelection{"cfgGapSideSelection", 2, "gap selection"};
-
-  // Filter collisionFilter = (nabs(aod::collision::posZ) < cfgCutVertex) && (aod::cent::centFT0C > cfgCentFT0CMin) && (aod::cent::centFT0C < cfgCentFT0CMax);
-  // Filter trackFilter = ((requireGlobalTrackInFilter()) || (aod::track::isGlobalTrackSDD == (uint8_t) true)) && (nabs(aod::track::eta) < cfgCutEta) && (aod::track::pt > cfgCutPtMin) && (aod::track::pt < cfgCutPtMax) && (aod::track::tpcChi2NCl < cfgCutChi2prTPCcls) && (nabs(aod::track::dcaZ) < cfgCutDCAz);
 
   // Corrections
   TH1D* mEfficiency = nullptr;
@@ -140,12 +148,17 @@ struct FlowCumulantsUpc {
   OutputObj<FlowContainer> fFC{FlowContainer("FlowContainer")};
   OutputObj<GFWWeights> fWeights{GFWWeights("weights")};
   HistogramRegistry registry{"registry"};
+  OutputObj<FlowContainer> fFCMc{FlowContainer("FlowContainerMC")};
+  OutputObj<GFWWeights> fWeightsMc{GFWWeights("weightsMC")};
 
   // define global variables
   GFW* fGFW = new GFW();
+  GFW* fGFWMC = new GFW();
   std::vector<GFW::CorrConfig> corrconfigs;
+  std::vector<GFW::CorrConfig> corrconfigsmc;
   TAxis* fPtAxis;
   TRandom3* fRndm = new TRandom3(0);
+  TRandom3* fRndmMc = new TRandom3(0);
   enum CentEstimators {
     kCentFT0C = 0,
     kCentFT0CVariant1,
@@ -161,12 +174,10 @@ struct FlowCumulantsUpc {
   ctpRateFetcher mRateFetcher;
   TH2* gCurrentHadronicRate;
 
-  // using AodCollisions = soa::Filtered<soa::Join<aod::Collisions, aod::EvSels, aod::CentFT0Cs, aod::CentFT0CVariant1s, aod::CentFT0Ms, aod::CentFV0As, aod::Mults>>;
-  // using AodTracks = soa::Filtered<soa::Join<aod::Tracks, aod::TrackSelection, aod::TracksExtra, aod::TracksDCA>>;
   //
   using UdTracks = soa::Join<aod::UDTracks, aod::UDTracksExtra, aod::UDTracksPID>;
   using UdTracksFull = soa::Join<aod::UDTracks, aod::UDTracksPID, aod::UDTracksExtra, aod::UDTracksFlags, aod::UDTracksDCA>;
-  using UDCollisionsFull = soa::Join<aod::UDCollisions, aod::SGCollisions, aod::UDCollisionsSels, aod::UDZdcsReduced>;
+  using UDCollisionsFull = soa::Join<aod::UDCollisions, aod::SGCollisions, aod::UDCollisionsSels, aod::UDZdcsReduced, aod::UDCollisionSelExtras>;
 
   // Track selection
   TrackSelection myTrackSel;
@@ -198,10 +209,17 @@ struct FlowCumulantsUpc {
     // Event QA
     registry.add("hEventCount", "Number of Event;; Count", {HistType::kTH1D, {{5, 0, 5}}});
     registry.get<TH1>(HIST("hEventCount"))->GetXaxis()->SetBinLabel(1, "Filtered event");
-    registry.get<TH1>(HIST("hEventCount"))->GetXaxis()->SetBinLabel(2, "after sel8");
-    registry.get<TH1>(HIST("hEventCount"))->GetXaxis()->SetBinLabel(3, "after supicious Runs removal");
-    registry.get<TH1>(HIST("hEventCount"))->GetXaxis()->SetBinLabel(4, "after additional event cut");
-    registry.get<TH1>(HIST("hEventCount"))->GetXaxis()->SetBinLabel(5, "after correction loads");
+    registry.get<TH1>(HIST("hEventCount"))->GetXaxis()->SetBinLabel(2, "after gapside selection");
+    registry.get<TH1>(HIST("hEventCount"))->GetXaxis()->SetBinLabel(3, "after its selection");
+    registry.get<TH1>(HIST("hEventCount"))->GetXaxis()->SetBinLabel(4, "after pt selection");
+    registry.get<TH1>(HIST("hEventCount"))->GetXaxis()->SetBinLabel(5, "after occupancy");
+    registry.add("hTrackCount", "Number of tracks;; Count", {HistType::kTH1D, {{5, 0, 5}}});
+    registry.get<TH1>(HIST("hTrackCount"))->GetXaxis()->SetBinLabel(1, "after event selection");
+    registry.get<TH1>(HIST("hTrackCount"))->GetXaxis()->SetBinLabel(2, "PVContributor");
+    registry.get<TH1>(HIST("hTrackCount"))->GetXaxis()->SetBinLabel(3, "dcaz");
+    registry.get<TH1>(HIST("hTrackCount"))->GetXaxis()->SetBinLabel(4, "dcaxy");
+    registry.get<TH1>(HIST("hTrackCount"))->GetXaxis()->SetBinLabel(5, "its clusters");
+    registry.get<TH1>(HIST("hTrackCount"))->GetXaxis()->SetBinLabel(6, "tpc chi2");
     registry.add("hEventCountSpecific", "Number of Event;; Count", {HistType::kTH1D, {{10, 0, 10}}});
     registry.get<TH1>(HIST("hEventCountSpecific"))->GetXaxis()->SetBinLabel(1, "after sel8");
     registry.get<TH1>(HIST("hEventCountSpecific"))->GetXaxis()->SetBinLabel(2, "kNoSameBunchPileup");
@@ -213,19 +231,19 @@ struct FlowCumulantsUpc {
     registry.get<TH1>(HIST("hEventCountSpecific"))->GetXaxis()->SetBinLabel(8, "occupancy");
     registry.get<TH1>(HIST("hEventCountSpecific"))->GetXaxis()->SetBinLabel(9, "MultCorrelation");
     registry.get<TH1>(HIST("hEventCountSpecific"))->GetXaxis()->SetBinLabel(10, "cfgEvSelV0AT0ACut");
-    if (cfgUseTentativeEventCounter) {
-      registry.add("hEventCountTentative", "Number of Event;; Count", {HistType::kTH1D, {{10, 0, 10}}});
-      registry.get<TH1>(HIST("hEventCountTentative"))->GetXaxis()->SetBinLabel(1, "after sel8");
-      registry.get<TH1>(HIST("hEventCountTentative"))->GetXaxis()->SetBinLabel(2, "kNoSameBunchPileup");
-      registry.get<TH1>(HIST("hEventCountTentative"))->GetXaxis()->SetBinLabel(3, "kIsGoodZvtxFT0vsPV");
-      registry.get<TH1>(HIST("hEventCountTentative"))->GetXaxis()->SetBinLabel(4, "kNoCollInTimeRangeStandard");
-      registry.get<TH1>(HIST("hEventCountTentative"))->GetXaxis()->SetBinLabel(5, "kIsGoodITSLayersAll");
-      registry.get<TH1>(HIST("hEventCountTentative"))->GetXaxis()->SetBinLabel(6, "kNoCollInRofStandard");
-      registry.get<TH1>(HIST("hEventCountTentative"))->GetXaxis()->SetBinLabel(7, "kNoHighMultCollInPrevRof");
-      registry.get<TH1>(HIST("hEventCountTentative"))->GetXaxis()->SetBinLabel(8, "occupancy");
-      registry.get<TH1>(HIST("hEventCountTentative"))->GetXaxis()->SetBinLabel(9, "MultCorrelation");
-      registry.get<TH1>(HIST("hEventCountTentative"))->GetXaxis()->SetBinLabel(10, "cfgEvSelV0AT0ACut");
-    }
+    // if (cfgUseTentativeEventCounter) {
+    //   registry.add("hEventCountTentative", "Number of Event;; Count", {HistType::kTH1D, {{10, 0, 10}}});
+    //   registry.get<TH1>(HIST("hEventCountTentative"))->GetXaxis()->SetBinLabel(1, "after sel8");
+    //   registry.get<TH1>(HIST("hEventCountTentative"))->GetXaxis()->SetBinLabel(2, "kNoSameBunchPileup");
+    //   registry.get<TH1>(HIST("hEventCountTentative"))->GetXaxis()->SetBinLabel(3, "kIsGoodZvtxFT0vsPV");
+    //   registry.get<TH1>(HIST("hEventCountTentative"))->GetXaxis()->SetBinLabel(4, "kNoCollInTimeRangeStandard");
+    //   registry.get<TH1>(HIST("hEventCountTentative"))->GetXaxis()->SetBinLabel(5, "kIsGoodITSLayersAll");
+    //   registry.get<TH1>(HIST("hEventCountTentative"))->GetXaxis()->SetBinLabel(6, "kNoCollInRofStandard");
+    //   registry.get<TH1>(HIST("hEventCountTentative"))->GetXaxis()->SetBinLabel(7, "kNoHighMultCollInPrevRof");
+    //   registry.get<TH1>(HIST("hEventCountTentative"))->GetXaxis()->SetBinLabel(8, "occupancy");
+    //   registry.get<TH1>(HIST("hEventCountTentative"))->GetXaxis()->SetBinLabel(9, "MultCorrelation");
+    //   registry.get<TH1>(HIST("hEventCountTentative"))->GetXaxis()->SetBinLabel(10, "cfgEvSelV0AT0ACut");
+    // }
     registry.add("hVtxZ", "Vexter Z distribution", {HistType::kTH1D, {axisVertex}});
     registry.add("hMult", "Multiplicity distribution", {HistType::kTH1D, {{3000, 0.5, 3000.5}}});
     std::string hCentTitle = "Centrality distribution, Estimator " + std::to_string(cfgCentEstimator);
@@ -264,6 +282,28 @@ struct FlowCumulantsUpc {
     registry.add("hDCAz", "DCAz after cuts; DCAz (cm); Pt", {HistType::kTH2D, {{200, -0.5, 0.5}, {200, 0, 5}}});
     registry.add("hDCAxy", "DCAxy after cuts; DCAxy (cm); Pt", {HistType::kTH2D, {{200, -0.5, 0.5}, {200, 0, 5}}});
     registry.add("hTrackCorrection2d", "Correlation table for number of tracks table; uncorrected track; corrected track", {HistType::kTH2D, {axisNch, axisNch}});
+    registry.add("hEtaNch2D", "Eta vs Nch; #eta; Nch", {HistType::kTH2D, {axisEta, axisNch}});
+
+    registry.add("hPhiMC", "#phi distribution", {HistType::kTH1D, {axisPhi}});
+    registry.add("hPhiWeightedMC", "corrected #phi distribution", {HistType::kTH1D, {axisPhi}});
+    registry.add("hEtaMC", "#eta distribution", {HistType::kTH1D, {axisEta}});
+    registry.add("hPtMC", "p_{T} distribution before cut", {HistType::kTH1D, {axisPtHist}});
+    registry.add("hPtRefMC", "p_{T} distribution after cut", {HistType::kTH1D, {axisPtHist}});
+    registry.add("hChi2prTPCclsMC", "#chi^{2}/cluster for the TPC track segment", {HistType::kTH1D, {{100, 0., 5.}}});
+    registry.add("hChi2prITSclsMC", "#chi^{2}/cluster for the ITS track", {HistType::kTH1D, {{100, 0., 50.}}});
+    registry.add("hnTPCCluMC", "Number of found TPC clusters", {HistType::kTH1D, {{100, 40, 180}}});
+    registry.add("hnITSCluMC", "Number of found ITS clusters", {HistType::kTH1D, {{100, 0, 20}}});
+    registry.add("hnTPCCrossedRowMC", "Number of crossed TPC Rows", {HistType::kTH1D, {{100, 40, 180}}});
+    registry.add("hDCAzMC", "DCAz after cuts; DCAz (cm); Pt", {HistType::kTH2D, {{200, -0.5, 0.5}, {200, 0, 5}}});
+    registry.add("hDCAxyMC", "DCAxy after cuts; DCAxy (cm); Pt", {HistType::kTH2D, {{200, -0.5, 0.5}, {200, 0, 5}}});
+    registry.add("hTrackCorrection2dMC", "Correlation table for number of tracks table; uncorrected track; corrected track", {HistType::kTH2D, {axisNch, axisNch}});
+
+    // // MC event QA histograms
+    // registry.add("eventCounterMC", "Number of MC Events;; Count", {HistType::kTH1D, {{5, 0, 5}}});
+    // registry.add("hVtxZMC", "Vexter Z distribution (MC)", {HistType::kTH1D, {axisVertex}});
+    // registry.add("hMultMC", "Multiplicity distribution (MC)", {HistType::kTH1D, {{3000, 0.5, 3000.5}}});
+    // registry.add("hCentMC", "Centrality distribution (MC)", {HistType::kTH1D, {{90, 0, 90}}});
+    // registry.add("numberOfTracksMC", "Number of MC tracks;; Count", {HistType::kTH1D, {{3000, 0.5, 3000.5}}});
 
     o2::framework::AxisSpec axis = axisPt;
     int nPtBins = axis.binEdges.size() - 1;
@@ -273,6 +313,8 @@ struct FlowCumulantsUpc {
     if (cfgOutputNUAWeights) {
       fWeights->setPtBins(nPtBins, ptBins);
       fWeights->init(true, false);
+      fWeightsMc->setPtBins(nPtBins, ptBins);
+      fWeightsMc->init(true, false);
     }
 
     // add in FlowContainer to Get boostrap sample automatically
@@ -335,6 +377,9 @@ struct FlowCumulantsUpc {
     fFC->SetName("FlowContainer");
     fFC->SetXAxis(fPtAxis);
     fFC->Initialize(oba, axisIndependent, cfgNbootstrap);
+    fFCMc->SetName("FlowContainerMC");
+    fFCMc->SetXAxis(fPtAxis);
+    fFCMc->Initialize(oba, axisIndependent, cfgNbootstrap);
     delete oba;
 
     // eta region
@@ -364,6 +409,33 @@ struct FlowCumulantsUpc {
     fGFW->AddRegion("olN", -0.8, -0.4, 1 + fPtAxis->GetNbins(), 4);
     fGFW->AddRegion("olN10", -0.8, -0.5, 1 + fPtAxis->GetNbins(), 4);
     fGFW->AddRegion("olfull", -0.8, 0.8, 1 + fPtAxis->GetNbins(), 4);
+
+    fGFWMC->AddRegion("full", -0.8, 0.8, 1, 1);
+    fGFWMC->AddRegion("refN00", -0.8, 0., 1, 1);   // gap0 negative region
+    fGFWMC->AddRegion("refP00", 0., 0.8, 1, 1);    // gap0 positve region
+    fGFWMC->AddRegion("refN02", -0.8, -0.1, 1, 1); // gap2 negative region
+    fGFWMC->AddRegion("refP02", 0.1, 0.8, 1, 1);   // gap2 positve region
+    fGFWMC->AddRegion("refN04", -0.8, -0.2, 1, 1); // gap4 negative region
+    fGFWMC->AddRegion("refP04", 0.2, 0.8, 1, 1);   // gap4 positve region
+    fGFWMC->AddRegion("refN06", -0.8, -0.3, 1, 1); // gap6 negative region
+    fGFWMC->AddRegion("refP06", 0.3, 0.8, 1, 1);   // gap6 positve region
+    fGFWMC->AddRegion("refN08", -0.8, -0.4, 1, 1);
+    fGFWMC->AddRegion("refP08", 0.4, 0.8, 1, 1);
+    fGFWMC->AddRegion("refN10", -0.8, -0.5, 1, 1);
+    fGFWMC->AddRegion("refP10", 0.5, 0.8, 1, 1);
+    fGFWMC->AddRegion("refN12", -0.8, -0.6, 1, 1);
+    fGFWMC->AddRegion("refP12", 0.6, 0.8, 1, 1);
+    fGFWMC->AddRegion("refN14", -0.8, -0.7, 1, 1);
+    fGFWMC->AddRegion("refP14", 0.7, 0.8, 1, 1);
+    fGFWMC->AddRegion("refN", -0.8, -0.4, 1, 1);
+    fGFWMC->AddRegion("refP", 0.4, 0.8, 1, 1);
+    fGFWMC->AddRegion("refM", -0.4, 0.4, 1, 1);
+    fGFWMC->AddRegion("poiN", -0.8, -0.4, 1 + fPtAxis->GetNbins(), 2);
+    fGFWMC->AddRegion("poiN10", -0.8, -0.5, 1 + fPtAxis->GetNbins(), 2);
+    fGFWMC->AddRegion("poifull", -0.8, 0.8, 1 + fPtAxis->GetNbins(), 2);
+    fGFWMC->AddRegion("olN", -0.8, -0.4, 1 + fPtAxis->GetNbins(), 4);
+    fGFWMC->AddRegion("olN10", -0.8, -0.5, 1 + fPtAxis->GetNbins(), 4);
+    fGFWMC->AddRegion("olfull", -0.8, 0.8, 1 + fPtAxis->GetNbins(), 4);
 
     corrconfigs.push_back(fGFW->GetCorrelatorConfig("full {2 -2}", "ChFull22", kFALSE));
     corrconfigs.push_back(fGFW->GetCorrelatorConfig("full {3 -3}", "ChFull32", kFALSE));
@@ -406,6 +478,47 @@ struct FlowCumulantsUpc {
     corrconfigs.push_back(fGFW->GetCorrelatorConfig("refN10 {4 2} refP10 {-4 -2}", "Ch10Gap4242", kFALSE));
     corrconfigs.push_back(fGFW->GetCorrelatorConfig("refN10 {2 2} refP10 {-2 -2}", "Ch10Gap24", kFALSE));
     corrconfigs.push_back(fGFW->GetCorrelatorConfig("poiN10 refN10 | olN10 {2 2} refP10 {-2 -2}", "Ch10Gap24", kTRUE));
+    corrconfigsmc.push_back(fGFWMC->GetCorrelatorConfig("full {2 -2}", "ChFull22", kFALSE));
+    corrconfigsmc.push_back(fGFWMC->GetCorrelatorConfig("full {3 -3}", "ChFull32", kFALSE));
+    corrconfigsmc.push_back(fGFWMC->GetCorrelatorConfig("full {4 -4}", "ChFull42", kFALSE));
+    corrconfigsmc.push_back(fGFWMC->GetCorrelatorConfig("full {2 2 -2 -2}", "ChFull24", kFALSE));
+    corrconfigsmc.push_back(fGFWMC->GetCorrelatorConfig("full {2 2 2 -2 -2 -2}", "ChFull26", kFALSE));
+    corrconfigsmc.push_back(fGFWMC->GetCorrelatorConfig("refN04 {2} refP04 {-2}", "Ch04Gap22", kFALSE));
+    corrconfigsmc.push_back(fGFWMC->GetCorrelatorConfig("refN06 {2} refP06 {-2}", "Ch06Gap22", kFALSE));
+    corrconfigsmc.push_back(fGFWMC->GetCorrelatorConfig("refN08 {2} refP08 {-2}", "Ch08Gap22", kFALSE));
+    corrconfigsmc.push_back(fGFWMC->GetCorrelatorConfig("refN10 {2} refP10 {-2}", "Ch10Gap22", kFALSE));
+    corrconfigsmc.push_back(fGFWMC->GetCorrelatorConfig("refN12 {2} refP12 {-2}", "Ch12Gap22", kFALSE));
+    corrconfigsmc.push_back(fGFWMC->GetCorrelatorConfig("refN04 {3} refP04 {-3}", "Ch04Gap32", kFALSE));
+    corrconfigsmc.push_back(fGFWMC->GetCorrelatorConfig("refN06 {3} refP06 {-3}", "Ch06Gap32", kFALSE));
+    corrconfigsmc.push_back(fGFWMC->GetCorrelatorConfig("refN08 {3} refP08 {-3}", "Ch08Gap32", kFALSE));
+    corrconfigsmc.push_back(fGFWMC->GetCorrelatorConfig("refN10 {3} refP10 {-3}", "Ch10Gap32", kFALSE));
+    corrconfigsmc.push_back(fGFWMC->GetCorrelatorConfig("refN12 {3} refP12 {-3}", "Ch12Gap32", kFALSE));
+    corrconfigsmc.push_back(fGFWMC->GetCorrelatorConfig("refN04 {4} refP04 {-4}", "Ch04Gap42", kFALSE));
+    corrconfigsmc.push_back(fGFWMC->GetCorrelatorConfig("refN06 {4} refP06 {-4}", "Ch06Gap42", kFALSE));
+    corrconfigsmc.push_back(fGFWMC->GetCorrelatorConfig("refN08 {4} refP08 {-4}", "Ch08Gap42", kFALSE));
+    corrconfigsmc.push_back(fGFWMC->GetCorrelatorConfig("refN10 {4} refP10 {-4}", "Ch10Gap42", kFALSE));
+    corrconfigsmc.push_back(fGFWMC->GetCorrelatorConfig("refN12 {4} refP12 {-4}", "Ch12Gap42", kFALSE));
+    corrconfigsmc.push_back(fGFWMC->GetCorrelatorConfig("refN {2} refP {-2}", "ChGap22", kFALSE));
+    corrconfigsmc.push_back(fGFWMC->GetCorrelatorConfig("poifull full | olfull {2 -2}", "ChFull22", kTRUE));
+    corrconfigsmc.push_back(fGFWMC->GetCorrelatorConfig("poifull full | olfull {2 2 -2 -2}", "ChFull24", kTRUE));
+    corrconfigsmc.push_back(fGFWMC->GetCorrelatorConfig("poifull full | olfull {2 2 2 -2 -2 -2}", "ChFull26", kTRUE));
+    corrconfigsmc.push_back(fGFWMC->GetCorrelatorConfig("poiN10 refN10 | olN10 {2} refP10 {-2}", "Ch10Gap22", kTRUE));
+    corrconfigsmc.push_back(fGFWMC->GetCorrelatorConfig("poiN10 refN10 | olN10 {3} refP10 {-3}", "Ch10Gap32", kTRUE));
+    corrconfigsmc.push_back(fGFWMC->GetCorrelatorConfig("poiN10 refN10 | olN10 {4} refP10 {-4}", "Ch10Gap42", kTRUE));
+    corrconfigsmc.push_back(fGFWMC->GetCorrelatorConfig("full {4 -2 -2}", "ChFull422", kFALSE));
+    corrconfigsmc.push_back(fGFWMC->GetCorrelatorConfig("refN04 {-2 -2} refP04 {4}", "Ch04GapA422", kFALSE));
+    corrconfigsmc.push_back(fGFWMC->GetCorrelatorConfig("refN04 {4} refP04 {-2 -2}", "Ch04GapB422", kFALSE));
+    corrconfigsmc.push_back(fGFWMC->GetCorrelatorConfig("refN10 {-2 -2} refP10 {4}", "Ch10GapA422", kFALSE));
+    corrconfigsmc.push_back(fGFWMC->GetCorrelatorConfig("refN10 {4} refP10 {-2 -2}", "Ch10GapB422", kFALSE));
+    corrconfigsmc.push_back(fGFWMC->GetCorrelatorConfig("full {3 2 -3 -2}", "ChFull3232", kFALSE));
+    corrconfigsmc.push_back(fGFWMC->GetCorrelatorConfig("full {4 2 -4 -2}", "ChFull4242", kFALSE));
+    corrconfigsmc.push_back(fGFWMC->GetCorrelatorConfig("refN04 {3 2} refP04 {-3 -2}", "Ch04Gap3232", kFALSE));
+    corrconfigsmc.push_back(fGFWMC->GetCorrelatorConfig("refN04 {4 2} refP04 {-4 -2}", "Ch04Gap4242", kFALSE));
+    corrconfigsmc.push_back(fGFWMC->GetCorrelatorConfig("refN04 {2 2} refP04 {-2 -2}", "Ch04Gap24", kFALSE));
+    corrconfigsmc.push_back(fGFWMC->GetCorrelatorConfig("refN10 {3 2} refP10 {-3 -2}", "Ch10Gap3232", kFALSE));
+    corrconfigsmc.push_back(fGFWMC->GetCorrelatorConfig("refN10 {4 2} refP10 {-4 -2}", "Ch10Gap4242", kFALSE));
+    corrconfigsmc.push_back(fGFWMC->GetCorrelatorConfig("refN10 {2 2} refP10 {-2 -2}", "Ch10Gap24", kFALSE));
+    corrconfigsmc.push_back(fGFWMC->GetCorrelatorConfig("poiN10 refN10 | olN10 {2 2} refP10 {-2 -2}", "Ch10Gap24", kTRUE));
     if (!userDefineGFWCorr.empty() && !userDefineGFWName.empty()) {
       LOGF(info, "User adding GFW CorrelatorConfig:");
       // attentaion: here we follow the index of cfgUserDefineGFWCorr
@@ -420,22 +533,22 @@ struct FlowCumulantsUpc {
     }
     fGFW->CreateRegions();
 
-    if (cfgUseAdditionalEventCut) {
-      fMultPVCutLow = new TF1("fMultPVCutLow", "[0]+[1]*x+[2]*x*x+[3]*x*x*x+[4]*x*x*x*x - 3.5*([5]+[6]*x+[7]*x*x+[8]*x*x*x+[9]*x*x*x*x)", 0, 100);
-      fMultPVCutLow->SetParameters(3257.29, -121.848, 1.98492, -0.0172128, 6.47528e-05, 154.756, -1.86072, -0.0274713, 0.000633499, -3.37757e-06);
-      fMultPVCutHigh = new TF1("fMultPVCutHigh", "[0]+[1]*x+[2]*x*x+[3]*x*x*x+[4]*x*x*x*x + 3.5*([5]+[6]*x+[7]*x*x+[8]*x*x*x+[9]*x*x*x*x)", 0, 100);
-      fMultPVCutHigh->SetParameters(3257.29, -121.848, 1.98492, -0.0172128, 6.47528e-05, 154.756, -1.86072, -0.0274713, 0.000633499, -3.37757e-06);
+    // if (cfgUseAdditionalEventCut) {
+    //   fMultPVCutLow = new TF1("fMultPVCutLow", "[0]+[1]*x+[2]*x*x+[3]*x*x*x+[4]*x*x*x*x - 3.5*([5]+[6]*x+[7]*x*x+[8]*x*x*x+[9]*x*x*x*x)", 0, 100);
+    //   fMultPVCutLow->SetParameters(3257.29, -121.848, 1.98492, -0.0172128, 6.47528e-05, 154.756, -1.86072, -0.0274713, 0.000633499, -3.37757e-06);
+    //   fMultPVCutHigh = new TF1("fMultPVCutHigh", "[0]+[1]*x+[2]*x*x+[3]*x*x*x+[4]*x*x*x*x + 3.5*([5]+[6]*x+[7]*x*x+[8]*x*x*x+[9]*x*x*x*x)", 0, 100);
+    //   fMultPVCutHigh->SetParameters(3257.29, -121.848, 1.98492, -0.0172128, 6.47528e-05, 154.756, -1.86072, -0.0274713, 0.000633499, -3.37757e-06);
 
-      fMultCutLow = new TF1("fMultCutLow", "[0]+[1]*x+[2]*x*x+[3]*x*x*x - 2.*([4]+[5]*x+[6]*x*x+[7]*x*x*x+[8]*x*x*x*x)", 0, 100);
-      fMultCutLow->SetParameters(1654.46, -47.2379, 0.449833, -0.0014125, 150.773, -3.67334, 0.0530503, -0.000614061, 3.15956e-06);
-      fMultCutHigh = new TF1("fMultCutHigh", "[0]+[1]*x+[2]*x*x+[3]*x*x*x + 3.*([4]+[5]*x+[6]*x*x+[7]*x*x*x+[8]*x*x*x*x)", 0, 100);
-      fMultCutHigh->SetParameters(1654.46, -47.2379, 0.449833, -0.0014125, 150.773, -3.67334, 0.0530503, -0.000614061, 3.15956e-06);
+    //   fMultCutLow = new TF1("fMultCutLow", "[0]+[1]*x+[2]*x*x+[3]*x*x*x - 2.*([4]+[5]*x+[6]*x*x+[7]*x*x*x+[8]*x*x*x*x)", 0, 100);
+    //   fMultCutLow->SetParameters(1654.46, -47.2379, 0.449833, -0.0014125, 150.773, -3.67334, 0.0530503, -0.000614061, 3.15956e-06);
+    //   fMultCutHigh = new TF1("fMultCutHigh", "[0]+[1]*x+[2]*x*x+[3]*x*x*x + 3.*([4]+[5]*x+[6]*x*x+[7]*x*x*x+[8]*x*x*x*x)", 0, 100);
+    //   fMultCutHigh->SetParameters(1654.46, -47.2379, 0.449833, -0.0014125, 150.773, -3.67334, 0.0530503, -0.000614061, 3.15956e-06);
 
-      fT0AV0AMean = new TF1("fT0AV0AMean", "[0]+[1]*x", 0, 200000);
-      fT0AV0AMean->SetParameters(-1601.0581, 9.417652e-01);
-      fT0AV0ASigma = new TF1("fT0AV0ASigma", "[0]+[1]*x+[2]*x*x+[3]*x*x*x+[4]*x*x*x*x", 0, 200000);
-      fT0AV0ASigma->SetParameters(463.4144, 6.796509e-02, -9.097136e-07, 7.971088e-12, -2.600581e-17);
-    }
+    //   fT0AV0AMean = new TF1("fT0AV0AMean", "[0]+[1]*x", 0, 200000);
+    //   fT0AV0AMean->SetParameters(-1601.0581, 9.417652e-01);
+    //   fT0AV0ASigma = new TF1("fT0AV0ASigma", "[0]+[1]*x+[2]*x*x+[3]*x*x*x+[4]*x*x*x*x", 0, 200000);
+    //   fT0AV0ASigma->SetParameters(463.4144, 6.796509e-02, -9.097136e-07, 7.971088e-12, -2.600581e-17);
+    // }
 
     myTrackSel = getGlobalTrackSelectionRun3ITSMatch(TrackSelection::GlobalTrackRun3ITSMatching::Run3ITSibAny, TrackSelection::GlobalTrackRun3DCAxyCut::Default);
     myTrackSel.SetMinNClustersTPC(cfgCutTPCclu);
@@ -484,6 +597,51 @@ struct FlowCumulantsUpc {
       val = fGFW->Calculate(corrconf, i - 1, kFALSE).real() / dnx;
       if (std::fabs(val) < 1) {
         fFC->FillProfile(Form("%s_pt_%i", corrconf.Head.c_str(), i), cent, val, dnx, rndm);
+      }
+    }
+    return;
+  }
+
+  template <char... chars>
+  void fillProfileMC(const GFW::CorrConfig& corrconf, const ConstStr<chars...>& tarName, const double& cent)
+  {
+    double dnx, val;
+    dnx = fGFWMC->Calculate(corrconf, 0, kTRUE).real();
+    if (dnx == 0) {
+      return;
+    }
+    if (!corrconf.pTDif) {
+      val = fGFWMC->Calculate(corrconf, 0, kFALSE).real() / dnx;
+      if (std::fabs(val) < 1) {
+        registry.fill(tarName, cent, val, dnx);
+      }
+      return;
+    }
+    return;
+  }
+
+  void fillFCMC(const GFW::CorrConfig& corrconf, const double& cent, const double& rndm)
+  {
+    double dnx, val;
+    dnx = fGFWMC->Calculate(corrconf, 0, kTRUE).real();
+    if (!corrconf.pTDif) {
+      if (dnx == 0) {
+        return;
+      }
+      val = fGFWMC->Calculate(corrconf, 0, kFALSE).real() / dnx;
+      if (std::fabs(val) < 1) {
+        fFCMc->FillProfile(corrconf.Head.c_str(), cent, val, dnx, rndm);
+      }
+      return;
+    }
+    for (auto i = 1; i <= fPtAxis->GetNbins(); i++) {
+      dnx = fGFWMC->Calculate(corrconf, i - 1, kTRUE).real();
+      if (dnx == 0) {
+        continue;
+      }
+      val = fGFWMC->Calculate(corrconf, i - 1, kFALSE).real() / dnx;
+      if (std::fabs(val) < 1) {
+        fFCMc->FillProfile(Form("%s_pt_%i", corrconf.Head.c_str(), i), cent, val, dnx, rndm);
       }
     }
     return;
@@ -543,149 +701,154 @@ struct FlowCumulantsUpc {
     return true;
   }
 
-  template <typename TCollision>
-  bool eventSelected(TCollision collision, const int multTrk, const float centrality)
-  {
-    registry.fill(HIST("hEventCountSpecific"), 0.5);
-    if (cfgEvSelkNoSameBunchPileup && !collision.selection_bit(o2::aod::evsel::kNoSameBunchPileup)) {
-      // rejects collisions which are associated with the same "found-by-T0" bunch crossing
-      // https://indico.cern.ch/event/1396220/#1-event-selection-with-its-rof
-      return 0;
-    }
-    if (cfgEvSelkNoSameBunchPileup) {
-      registry.fill(HIST("hEventCountSpecific"), 1.5);
-    }
-    if (cfgEvSelkIsGoodZvtxFT0vsPV && !collision.selection_bit(o2::aod::evsel::kIsGoodZvtxFT0vsPV)) {
-      // removes collisions with large differences between z of PV by tracks and z of PV from FT0 A-C time difference
-      // use this cut at low multiplicities with caution
-      return 0;
-    }
-    if (cfgEvSelkIsGoodZvtxFT0vsPV) {
-      registry.fill(HIST("hEventCountSpecific"), 2.5);
-    }
-    if (cfgEvSelkNoCollInTimeRangeStandard && !collision.selection_bit(o2::aod::evsel::kNoCollInTimeRangeStandard)) {
-      // no collisions in specified time range
-      return 0;
-    }
-    if (cfgEvSelkNoCollInTimeRangeStandard) {
-      registry.fill(HIST("hEventCountSpecific"), 3.5);
-    }
-    if (cfgEvSelkIsGoodITSLayersAll && !collision.selection_bit(o2::aod::evsel::kIsGoodITSLayersAll)) {
-      // from Jan 9 2025 AOT meeting
-      // cut time intervals with dead ITS staves
-      return 0;
-    }
-    if (cfgEvSelkIsGoodITSLayersAll) {
-      registry.fill(HIST("hEventCountSpecific"), 4.5);
-    }
-    if (cfgEvSelkNoCollInRofStandard && !collision.selection_bit(o2::aod::evsel::kNoCollInRofStandard)) {
-      // no other collisions in this Readout Frame with per-collision multiplicity above threshold
-      return 0;
-    }
-    if (cfgEvSelkNoCollInRofStandard) {
-      registry.fill(HIST("hEventCountSpecific"), 5.5);
-    }
-    if (cfgEvSelkNoHighMultCollInPrevRof && !collision.selection_bit(o2::aod::evsel::kNoHighMultCollInPrevRof)) {
-      // veto an event if FT0C amplitude in previous ITS ROF is above threshold
-      return 0;
-    }
-    if (cfgEvSelkNoHighMultCollInPrevRof) {
-      registry.fill(HIST("hEventCountSpecific"), 6.5);
-    }
-    auto multNTracksPV = collision.multNTracksPV();
-    auto occupancy = collision.trackOccupancyInTimeRange();
-    if (cfgEvSelOccupancy && (occupancy < cfgCutOccupancyLow || occupancy > cfgCutOccupancyHigh)) {
-      return 0;
-    }
-    if (cfgEvSelOccupancy) {
-      registry.fill(HIST("hEventCountSpecific"), 7.5);
-    }
+  // template <typename TCollision>
+  // bool eventSelected(TCollision collision, const int multTrk, const float centrality)
+  // {
+  //   registry.fill(HIST("hEventCountSpecific"), 0.5);
+  //   if (cfgEvSelkNoSameBunchPileup && !collision.selection_bit(o2::aod::evsel::kNoSameBunchPileup)) {
+  //     // rejects collisions which are associated with the same "found-by-T0" bunch crossing
+  //     // https://indico.cern.ch/event/1396220/#1-event-selection-with-its-rof
+  //     return 0;
+  //   }
+  //   // if (cfgEvSelkNoSameBunchPileup) {
+  //   //   registry.fill(HIST("hEventCountSpecific"), 1.5);
+  //   // }
+  //   if (cfgEvSelkIsGoodZvtxFT0vsPV && !collision.selection_bit(o2::aod::evsel::kIsGoodZvtxFT0vsPV)) {
+  //     // removes collisions with large differences between z of PV by tracks and z of PV from FT0 A-C time difference
+  //     // use this cut at low multiplicities with caution
+  //     return 0;
+  //   }
+  //   if (cfgEvSelkIsGoodZvtxFT0vsPV) {
+  //     registry.fill(HIST("hEventCountSpecific"), 2.5);
+  //   }
+  //   if (cfgEvSelkNoCollInTimeRangeStandard && !collision.selection_bit(o2::aod::evsel::kNoCollInTimeRangeStandard)) {
+  //     // no collisions in specified time range
+  //     return 0;
+  //   }
+  //   if (cfgEvSelkNoCollInTimeRangeStandard) {
+  //     registry.fill(HIST("hEventCountSpecific"), 3.5);
+  //   }
+  //   if (cfgEvSelkIsGoodITSLayersAll && !collision.selection_bit(o2::aod::evsel::kIsGoodITSLayersAll)) {
+  //     // from Jan 9 2025 AOT meeting
+  //     // cut time intervals with dead ITS staves
+  //     return 0;
+  //   }
+  //   if (cfgEvSelkIsGoodITSLayersAll) {
+  //     registry.fill(HIST("hEventCountSpecific"), 4.5);
+  //   }
+  //   if (cfgEvSelkNoCollInRofStandard && !collision.selection_bit(o2::aod::evsel::kNoCollInRofStandard)) {
+  //     // no other collisions in this Readout Frame with per-collision multiplicity above threshold
+  //     return 0;
+  //   }
+  //   if (cfgEvSelkNoCollInRofStandard) {
+  //     registry.fill(HIST("hEventCountSpecific"), 5.5);
+  //   }
+  //   if (cfgEvSelkNoHighMultCollInPrevRof && !collision.selection_bit(o2::aod::evsel::kNoHighMultCollInPrevRof)) {
+  //     // veto an event if FT0C amplitude in previous ITS ROF is above threshold
+  //     return 0;
+  //   }
+  //   if (cfgEvSelkNoHighMultCollInPrevRof) {
+  //     registry.fill(HIST("hEventCountSpecific"), 6.5);
+  //   }
+  //   auto multNTracksPV = collision.multNTracksPV();
+  //   auto occupancy = collision.occupancyInTime();
+  //   if (cfgEvSelOccupancy && (occupancy < cfgCutOccupancyLow || occupancy > cfgCutOccupancyHigh)) {
+  //     return 0;
+  //   }
+  //   if (cfgEvSelOccupancy) {
+  //     registry.fill(HIST("hEventCountSpecific"), 7.5);
+  //   }
 
-    if (cfgEvSelMultCorrelation) {
-      if (multNTracksPV < fMultPVCutLow->Eval(centrality))
-        return 0;
-      if (multNTracksPV > fMultPVCutHigh->Eval(centrality))
-        return 0;
-      if (multTrk < fMultCutLow->Eval(centrality))
-        return 0;
-      if (multTrk > fMultCutHigh->Eval(centrality))
-        return 0;
-    }
-    if (cfgEvSelMultCorrelation) {
-      registry.fill(HIST("hEventCountSpecific"), 8.5);
-    }
+  //   if (cfgEvSelMultCorrelation) {
+  //     if (multNTracksPV < fMultPVCutLow->Eval(centrality))
+  //       return 0;
+  //     if (multNTracksPV > fMultPVCutHigh->Eval(centrality))
+  //       return 0;
+  //     if (multTrk < fMultCutLow->Eval(centrality))
+  //       return 0;
+  //     if (multTrk > fMultCutHigh->Eval(centrality))
+  //       return 0;
+  //   }
+  //   if (cfgEvSelMultCorrelation) {
+  //     registry.fill(HIST("hEventCountSpecific"), 8.5);
+  //   }
 
-    // V0A T0A 5 sigma cut
-    if (cfgEvSelV0AT0ACut && (std::fabs(collision.multFV0A() - fT0AV0AMean->Eval(collision.multFT0A())) > 5 * fT0AV0ASigma->Eval(collision.multFT0A()))) {
-      return 0;
-    }
-    if (cfgEvSelV0AT0ACut) {
-      registry.fill(HIST("hEventCountSpecific"), 9.5);
-    }
+  //   // V0A T0A 5 sigma cut
+  //   constexpr int kSigmaCut = 5;
+  //   if (cfgEvSelV0AT0ACut && (std::fabs(collision.multFV0A() - fT0AV0AMean->Eval(collision.multFT0A())) > kSigmaCut * fT0AV0ASigma->Eval(collision.multFT0A()))) {
+  //     return 0;
+  //   }
+  //   if (cfgEvSelV0AT0ACut) {
+  //     registry.fill(HIST("hEventCountSpecific"), 9.5);
+  //   }
 
-    return 1;
-  }
+  //   return 1;
+  // }
 
-  template <typename TCollision>
-  void eventCounterQA(TCollision collision, const int multTrk, const float centrality)
-  {
-    registry.fill(HIST("hEventCountTentative"), 0.5);
-    // Regradless of the event selection, fill the event counter histograms
-    if (collision.selection_bit(o2::aod::evsel::kNoSameBunchPileup)) {
-      registry.fill(HIST("hEventCountTentative"), 1.5);
-    }
-    if (collision.selection_bit(o2::aod::evsel::kIsGoodZvtxFT0vsPV)) {
-      registry.fill(HIST("hEventCountTentative"), 2.5);
-    }
-    if (collision.selection_bit(o2::aod::evsel::kNoCollInTimeRangeStandard)) {
-      registry.fill(HIST("hEventCountTentative"), 3.5);
-    }
-    if (collision.selection_bit(o2::aod::evsel::kIsGoodITSLayersAll)) {
-      registry.fill(HIST("hEventCountTentative"), 4.5);
-    }
-    if (collision.selection_bit(o2::aod::evsel::kNoCollInRofStandard)) {
-      registry.fill(HIST("hEventCountTentative"), 5.5);
-    }
-    if (collision.selection_bit(o2::aod::evsel::kNoHighMultCollInPrevRof)) {
-      registry.fill(HIST("hEventCountTentative"), 6.5);
-    }
-    auto multNTracksPV = collision.multNTracksPV();
-    auto occupancy = collision.trackOccupancyInTimeRange();
-    if (!(occupancy < cfgCutOccupancyLow || occupancy > cfgCutOccupancyHigh)) {
-      registry.fill(HIST("hEventCountTentative"), 7.5);
-    }
-    if (!((multNTracksPV < fMultPVCutLow->Eval(centrality)) || (multNTracksPV > fMultPVCutHigh->Eval(centrality)) || (multTrk < fMultCutLow->Eval(centrality)) || (multTrk > fMultCutHigh->Eval(centrality)))) {
-      registry.fill(HIST("hEventCountTentative"), 8.5);
-    }
-    if (!(std::fabs(collision.multFV0A() - fT0AV0AMean->Eval(collision.multFT0A())) > 5 * fT0AV0ASigma->Eval(collision.multFT0A()))) {
-      registry.fill(HIST("hEventCountTentative"), 9.5);
-    }
-  }
+  // // template <typename TCollision>
+  // // void eventCounterQA(TCollision collision, const int multTrk, const float centrality)
+  // // {
+  // //   registry.fill(HIST("hEventCountTentative"), 0.5);
+  // //   // Regradless of the event selection, fill the event counter histograms
+  // //   if (collision.selection_bit(o2::aod::evsel::kNoSameBunchPileup)) {
+  // //     registry.fill(HIST("hEventCountTentative"), 1.5);
+  // //   }
+  // //   if (collision.selection_bit(o2::aod::evsel::kIsGoodZvtxFT0vsPV)) {
+  // //     registry.fill(HIST("hEventCountTentative"), 2.5);
+  //   }
+  //   if (collision.selection_bit(o2::aod::evsel::kNoCollInTimeRangeStandard)) {
+  //     registry.fill(HIST("hEventCountTentative"), 3.5);
+  //   }
+  //   if (collision.selection_bit(o2::aod::evsel::kIsGoodITSLayersAll)) {
+  //     registry.fill(HIST("hEventCountTentative"), 4.5);
+  //   }
+  //   if (collision.selection_bit(o2::aod::evsel::kNoCollInRofStandard)) {
+  //     registry.fill(HIST("hEventCountTentative"), 5.5);
+  //   }
+  //   if (collision.selection_bit(o2::aod::evsel::kNoHighMultCollInPrevRof)) {
+  //     registry.fill(HIST("hEventCountTentative"), 6.5);
+  //   }
+  //   auto multNTracksPV = collision.multNTracksPV();
+  //   auto occupancy = collision.trackOccupancyInTimeRange();
+  //   if (!(occupancy < cfgCutOccupancyLow || occupancy > cfgCutOccupancyHigh)) {
+  //     registry.fill(HIST("hEventCountTentative"), 7.5);
+  //   }
+  //   if (!((multNTracksPV < fMultPVCutLow->Eval(centrality)) || (multNTracksPV > fMultPVCutHigh->Eval(centrality)) || (multTrk < fMultCutLow->Eval(centrality)) || (multTrk > fMultCutHigh->Eval(centrality)))) {
+  //     registry.fill(HIST("hEventCountTentative"), 8.5);
+  //   }
+  //   // constexpr int kSigmaCut = 5;
+  //   // if (!(std::fabs(collision.multFV0A() - fT0AV0AMean->Eval(collision.multFT0A())) > kSigmaCut * fT0AV0ASigma->Eval(collision.multFT0A()))) {
+  //   //   registry.fill(HIST("hEventCountTentative"), 9.5);
+  //   // }
+  // }
 
   template <typename TTrack>
   bool trackSelected(TTrack track)
   {
+    registry.fill(HIST("hTrackCount"), 0.5);
     // UPC selection
     if (!track.isPVContributor()) {
       return false;
     }
-    if (!(std::fabs(track.dcaZ()) < 2.)) {
+    registry.fill(HIST("hTrackCount"), 1.5);
+    if (cfgDcaz && !(std::fabs(track.dcaZ()) < cfgDcazCut)) {
       return false;
     }
+    registry.fill(HIST("hTrackCount"), 2.5);
     double dcaLimit = 0.0105 + 0.035 / std::pow(track.pt(), 1.1);
-    if (!(std::fabs(track.dcaXY()) < dcaLimit)) {
+    if (cfgDcaxy && !(std::fabs(track.dcaXY()) < dcaLimit)) {
       return false;
     }
+    registry.fill(HIST("hTrackCount"), 3.5);
+    if (track.itsClusterSizes() <= cfgItsClusterSize) {
+      return false;
+    }
+    registry.fill(HIST("hTrackCount"), 4.5);
+    if (track.tpcChi2NCl() >= cfgMaxTPCChi2NCl) {
+      return false;
+    }
+    registry.fill(HIST("hTrackCount"), 5.5);
     return true;
-
-    // if (cfgCutDCAzPtDepEnabled && (std::fabs(track.dcaZ()) > (0.004f + 0.013f / track.pt())))
-    //  return false;
-
-    // if (cfgTrkSelSwitch) {
-    //   return myTrackSel.IsSelected(track);
-    // } else {
-    //   return ((track.tpcNClsFound() >= cfgCutTPCclu) && (track.itsNCls() >= cfgCutITSclu));
-    // }
   }
 
   void initHadronicRate(aod::BCsWithTimestamps::iterator const& bc)
@@ -705,116 +868,92 @@ struct FlowCumulantsUpc {
     gCurrentHadronicRate = gHadronicRate[mRunNumber];
   }
 
-  // void process(AodCollisions::iterator const& collision, aod::BCsWithTimestamps const&, AodTracks const& tracks)
+  template <typename TTrack>
+  float getDPhiStar(TTrack const& track1, TTrack const& track2, float radius, int runnum)
+  {
+    float charge1 = track1.sign();
+    float charge2 = track2.sign();
+
+    float phi1 = track1.phi();
+    float phi2 = track2.phi();
+
+    float pt1 = track1.pt();
+    float pt2 = track2.pt();
+
+    int fbSign = 1;
+
+    int zzo = 544868;
+    if (runnum >= zzo) {
+      fbSign = -1;
+    }
+
+    float dPhiStar = phi1 - phi2 - charge1 * fbSign * std::asin(0.075 * radius / pt1) + charge2 * fbSign * std::asin(0.075 * radius / pt2);
+
+    if (dPhiStar > constants::math::PI)
+      dPhiStar = constants::math::TwoPI - dPhiStar;
+    if (dPhiStar < -constants::math::PI)
+      dPhiStar = -constants::math::TwoPI - dPhiStar;
+
+    return dPhiStar;
+  }
+
   void process(UDCollisionsFull::iterator const& collision, UdTracksFull const& tracks)
   {
-
-    // Runnumber loading test
-    // accept only selected run numbers
-    // int run = collision.runNumber();
-
-    // extract bc pattern from CCDB for data or anchored MC only
-    // if (run != lastRun && run >= 500000) {
-    //   LOGF(info, "Updating bcPattern %d ...", run);
-    //   auto tss = ccdb->getRunDuration(run);
-    //   auto grplhcif = ccdb->getForTimeStamp<o2::parameters::GRPLHCIFData>("GLO/Config/GRPLHCIF", tss.first);
-    //   bcPatternB = grplhcif->getBunchFilling().getBCPattern();
-    //   lastRun = run;
-    //   LOGF(info, "done!");
-    // }
-
-    // auto bcnum = collision.globalBC();
-
     registry.fill(HIST("hEventCount"), 0.5);
+    // if(!eventSelected(collision, tracks.size(), 100.0f)) {
+    //   eventCounterQA(collision, tracks.size(), 100.0f);
+    //   return;
+    // }
     int gapSide = collision.gapSide();
-    if (gapSide < 0 || gapSide > 2) {
+    if (gapSide == 0) {
+      if (!cfgGapSideA) {
+        return;
+      }
+    }
+    if (gapSide == 1) {
+      if (!cfgGapSideC) {
+        return;
+      }
+    }
+    if (gapSide != 0 && gapSide != 1) {
       return;
     }
-
     int trueGapSide = sgSelector.trueGap(collision, cfgCutFV0, cfgCutFT0A, cfgCutFT0C, cfgCutZDC);
     gapSide = trueGapSide;
-    if (gapSide == cfgGapSideSelection) {
+    if (gapSide == 0) {
+      if (!cfgGapSideA) {
+        return;
+      }
+    }
+    if (gapSide == 1) {
+      if (!cfgGapSideC) {
+        return;
+      }
+    }
+    if (gapSide != 0 && gapSide != 1) {
       return;
     }
-
-    // if (!cfgUseSmallMemory && tracks.size() >= 1) {
-    //   registry.fill(HIST("BeforeSel8_globalTracks_centT0C"), collision.centFT0C(), tracks.size());
-    // }
-    // if (!collision.sel8())
-    //   return;
-    // if (tracks.size() < 1)
-    //   return;
     registry.fill(HIST("hEventCount"), 1.5);
-    // auto bc = collision.bc_as<aod::BCsWithTimestamps>();
-    // int currentRunNumber = bc.runNumber();
-    // for (const auto& ExcludedRun : cfgRunRemoveList.value) {
-    //   if (currentRunNumber == ExcludedRun) {
-    //     return;
-    //   }
-    // }
-    // registry.fill(HIST("hEventCount"), 2.5);
-    // if (!cfgUseSmallMemory) {
-    //   registry.fill(HIST("BeforeCut_globalTracks_centT0C"), collision.centFT0C(), tracks.size());
-    //   registry.fill(HIST("BeforeCut_PVTracks_centT0C"), collision.centFT0C(), collision.multNTracksPV());
-    //   registry.fill(HIST("BeforeCut_globalTracks_PVTracks"), collision.multNTracksPV(), tracks.size());
-    //   registry.fill(HIST("BeforeCut_globalTracks_multT0A"), collision.multFT0A(), tracks.size());
-    //   registry.fill(HIST("BeforeCut_globalTracks_multV0A"), collision.multFV0A(), tracks.size());
-    //   registry.fill(HIST("BeforeCut_multV0A_multT0A"), collision.multFT0A(), collision.multFV0A());
-    //   registry.fill(HIST("BeforeCut_multT0C_centT0C"), collision.centFT0C(), collision.multFT0C());
-    // }
+    if (cfgIsGoodItsLayers && collision.trs() == 0) {
+      return;
+    }
+    registry.fill(HIST("hEventCount"), 2.5);
     float cent = 100;
-    // switch (cfgCentEstimator) {
-    //   case kCentFT0C:
-    //     cent = collision.centFT0C();
-    //     break;
-    //   case kCentFT0CVariant1:
-    //     cent = collision.centFT0CVariant1();
-    //     break;
-    //   case kCentFT0M:
-    //     cent = collision.centFT0M();
-    //     break;
-    //   case kCentFV0A:
-    //     cent = collision.centFV0A();
-    //     break;
-    //   default:
-    //     cent = collision.centFT0C();
-    // }
-    // if (cfgUseTentativeEventCounter)
-    //   eventCounterQA(collision, tracks.size(), cent);
-    // if (cfgUseAdditionalEventCut && !eventSelected(collision, tracks.size(), cent))
-    //   return;
-    // registry.fill(HIST("hEventCount"), 3.5);
     float lRandom = fRndm->Rndm();
     float vtxz = collision.posZ();
     registry.fill(HIST("hVtxZ"), vtxz);
     registry.fill(HIST("hMult"), tracks.size());
     registry.fill(HIST("hCent"), cent);
     fGFW->Clear();
-    // if (cfgGetInteractionRate) {
-    //   initHadronicRate(bc);
-    //   double hadronicRate = mRateFetcher.fetch(ccdb.service, bc.timestamp(), mRunNumber, "ZNC hadronic") * 1.e-3; //
-    //   double seconds = bc.timestamp() * 1.e-3 - mMinSeconds;
-    //   if (cfgUseInteractionRateCut && (hadronicRate < cfgCutMinIR || hadronicRate > cfgCutMaxIR)) // cut on hadronic rate
-    //     return;
-    //   gCurrentHadronicRate->Fill(seconds, hadronicRate);
-    // }
-    // loadCorrections(bc.timestamp(), currentRunNumber);
-    // registry.fill(HIST("hEventCount"), 4.5);
-
-    // // fill event QA
-    // if (!cfgUseSmallMemory) {
-    //   registry.fill(HIST("globalTracks_centT0C"), collision.centFT0C(), tracks.size());
-    //   registry.fill(HIST("PVTracks_centT0C"), collision.centFT0C(), collision.multNTracksPV());
-    //   registry.fill(HIST("globalTracks_PVTracks"), collision.multNTracksPV(), tracks.size());
-    //   registry.fill(HIST("globalTracks_multT0A"), collision.multFT0A(), tracks.size());
-    //   registry.fill(HIST("globalTracks_multV0A"), collision.multFV0A(), tracks.size());
-    //   registry.fill(HIST("multV0A_multT0A"), collision.multFT0A(), collision.multFV0A());
-    //   registry.fill(HIST("multT0C_centT0C"), collision.centFT0C(), collision.multFT0C());
-    //   registry.fill(HIST("centFT0CVar_centFT0C"), collision.centFT0C(), collision.centFT0CVariant1());
-    //   registry.fill(HIST("centFT0M_centFT0C"), collision.centFT0C(), collision.centFT0M());
-    //   registry.fill(HIST("centFV0A_centFT0C"), collision.centFT0C(), collision.centFV0A());
-    // }
-
+    if (cfgIfVertex && abs(vtxz) > cfgCutVertex) {
+      return;
+    }
+    registry.fill(HIST("hEventCount"), 3.5);
+    int occupancy = collision.occupancyInTime();
+    if (cfgEvSelOccupancy && (occupancy < cfgCutOccupancyLow || occupancy > cfgCutOccupancyHigh)) {
+      return;
+    }
+    registry.fill(HIST("hEventCount"), 4.5);
     // // track weights
     float weff = 1, wacc = 1;
     double nTracksCorrected = 0;
@@ -824,8 +963,10 @@ struct FlowCumulantsUpc {
     }
 
     for (const auto& track : tracks) {
-      if (!trackSelected(track))
+      registry.fill(HIST("hChi2prTPCcls"), track.tpcChi2NCl());
+      if (!trackSelected(track)) {
         continue;
+      }
       auto momentum = std::array<double, 3>{track.px(), track.py(), track.pz()};
       double pt = RecoDecay::pt(momentum);
       double phi = RecoDecay::phi(momentum);
@@ -850,11 +991,6 @@ struct FlowCumulantsUpc {
         registry.fill(HIST("hPhiWeighted"), phi, wacc);
         registry.fill(HIST("hEta"), eta);
         registry.fill(HIST("hPtRef"), pt);
-        // registry.fill(HIST("hChi2prTPCcls"), track.tpcChi2NCl());
-        // registry.fill(HIST("hChi2prITScls"), track.itsChi2NCl());
-        // registry.fill(HIST("hnTPCClu"), track.tpcNClsFound());
-        // registry.fill(HIST("hnITSClu"), track.itsNCls());
-        // registry.fill(HIST("hnTPCCrossedRow"), track.tpcNClsCrossedRows());
         registry.fill(HIST("hDCAz"), track.dcaZ(), track.pt());
         registry.fill(HIST("hDCAxy"), track.dcaXY(), track.pt());
         nTracksCorrected += weff;
@@ -868,6 +1004,7 @@ struct FlowCumulantsUpc {
       if (withinPtPOI && withinPtRef) {
         fGFW->Fill(eta, fPtAxis->FindBin(pt) - 1, phi, wacc * weff, 4);
       }
+      registry.fill(HIST("hEtaNch2D"), eta, tracks.size());
     }
     registry.fill(HIST("hTrackCorrection2d"), tracks.size(), nTracksCorrected);
 
@@ -876,10 +1013,96 @@ struct FlowCumulantsUpc {
       fillFC(corrconfigs.at(l_ind), independent, lRandom);
     }
   }
+  PROCESS_SWITCH(FlowCumulantsUpc, process, "process", true);
+
+  //-----------------------------------------------------------------------------------------------------------------------
+  void processSim(aod::UDMcCollision const& mcCollision, aod::UDMcParticles const& mcParticles)
+  {
+    registry.fill(HIST("eventCounterMC"), 0.5);
+
+    registry.fill(HIST("hEventCount"), 1.5);
+    float cent = 100;
+    float vtxz = mcCollision.posZ();
+    registry.fill(HIST("hVtxZMC"), vtxz);
+    registry.fill(HIST("hMultMC"), mcParticles.size());
+    registry.fill(HIST("hCentMC"), cent);
+
+    auto massPion = o2::constants::physics::MassPionCharged;
+    registry.fill(HIST("numberOfTracksMC"), mcParticles.size());
+    // LOGF(info, "New event! mcParticles.size() = %d", mcParticles.size());
+
+    float lRandomMc = fRndmMc->Rndm();
+    fGFWMC->Clear();
+
+    // // track weights
+    float weff = 1, wacc = 1;
+    double nTracksCorrected = 0;
+    float independent = cent;
+    if (cfgUseNch) {
+      independent = static_cast<float>(mcParticles.size());
+    }
+
+    for (const auto& mcParticle : mcParticles) {
+      if (!mcParticle.isPhysicalPrimary())
+        continue;
+      std::array<double, 3> momentum = {mcParticle.px(), mcParticle.py(), mcParticle.pz()};
+      double energy = std::sqrt(momentum[0] * momentum[0] + momentum[1] * momentum[1] + momentum[2] * momentum[2] + massPion * massPion);
+      ROOT::Math::LorentzVector<ROOT::Math::PxPyPzE4D<double>> protoMC(momentum[0], momentum[1], momentum[2], energy);
+      constexpr double kEtaCut = 0.8;
+      constexpr double kPtCut = 0.1;
+      if (!(std::fabs(protoMC.Eta()) < kEtaCut && protoMC.Pt() > kPtCut)) {
+        continue;
+      }
+      // auto momentum = std::array<double, 3>{mcParticle.px(), mcParticle.py(), mcParticle.pz()};
+      double pt = RecoDecay::pt(momentum);
+      double phi = RecoDecay::phi(momentum);
+      double eta = RecoDecay::eta(momentum);
+      bool withinPtPOI = (cfgCutPtPOIMin < pt) && (pt < cfgCutPtPOIMax); // within POI pT range
+      bool withinPtRef = (cfgCutPtRefMin < pt) && (pt < cfgCutPtRefMax); // within RF pT range
+      if (cfgOutputNUAWeights) {
+        if (cfgOutputNUAWeightsRefPt) {
+          if (withinPtRef) {
+            fWeightsMc->fill(phi, eta, vtxz, pt, cent, 0);
+          }
+        } else {
+          fWeightsMc->fill(phi, eta, vtxz, pt, cent, 0);
+        }
+      }
+      if (!setCurrentParticleWeights(weff, wacc, phi, eta, pt, vtxz)) {
+        continue;
+      }
+      if (withinPtRef) {
+        registry.fill(HIST("hPhiMC"), phi);
+        registry.fill(HIST("hPhiWeightedMC"), phi, wacc);
+        registry.fill(HIST("hEtaMC"), eta);
+        registry.fill(HIST("hPtRefMC"), pt);
+        // registry.fill(HIST("hDCAzMC"), track.dcaZ(), track.pt());
+        // registry.fill(HIST("hDCAxyMC"), track.dcaXY(), track.pt());
+        nTracksCorrected += weff;
+      }
+      if (withinPtRef) {
+        fGFWMC->Fill(eta, fPtAxis->FindBin(pt) - 1, phi, wacc * weff, 1);
+      }
+      if (withinPtPOI) {
+        fGFWMC->Fill(eta, fPtAxis->FindBin(pt) - 1, phi, wacc * weff, 2);
+      }
+      if (withinPtPOI && withinPtRef) {
+        fGFWMC->Fill(eta, fPtAxis->FindBin(pt) - 1, phi, wacc * weff, 4);
+      }
+    }
+    registry.fill(HIST("hTrackCorrection2dMC"), mcParticles.size(), nTracksCorrected);
+
+    // Filling Flow Container
+    for (uint l_ind = 0; l_ind < corrconfigs.size(); l_ind++) {
+      fillFCMC(corrconfigs.at(l_ind), independent, lRandomMc);
+    }
+  }
+  PROCESS_SWITCH(FlowCumulantsUpc, processSim, "processSim", false);
 };
 
 WorkflowSpec defineDataProcessing(ConfigContext const& cfgc)
 {
   return WorkflowSpec{
-    adaptAnalysisTask<FlowCumulantsUpc>(cfgc)};
+    adaptAnalysisTask<FlowCumulantsUpc>(cfgc),
+  };
 }

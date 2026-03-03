@@ -18,8 +18,9 @@
 #include "Common/DataModel/Centrality.h"
 #include "Common/DataModel/EventSelection.h"
 #include "Common/DataModel/Multiplicity.h"
-#include "Common/DataModel/PIDResponse.h"
 #include "Common/DataModel/PIDResponseITS.h"
+#include "Common/DataModel/PIDResponseTOF.h"
+#include "Common/DataModel/PIDResponseTPC.h"
 #include "Common/DataModel/TrackSelectionTables.h"
 
 #include "CommonConstants/MathConstants.h"
@@ -34,9 +35,11 @@
 #include "Framework/RunningWorkflowInfo.h"
 #include "Framework/StepTHn.h"
 #include "Framework/runDataProcessing.h"
+#include "ReconstructionDataFormats/PID.h"
 #include "ReconstructionDataFormats/Track.h"
 #include <CCDB/BasicCCDBManager.h>
 
+#include <TComplex.h>
 #include <TDirectory.h>
 #include <TF1.h>
 #include <TFile.h>
@@ -63,7 +66,41 @@ using namespace o2;
 using namespace o2::framework;
 using namespace o2::framework::expressions;
 
+static constexpr float LongArrayFloat[3][20] = {{1.1, 1.2, 1.3, -1.1, -1.2, -1.3, 1.1, 1.2, 1.3, -1.1, -1.2, -1.3, 1.1, 1.2, 1.3, -1.1, -1.2, -1.3, 1.1, 1.2}, {2.1, 2.2, 2.3, -2.1, -2.2, -2.3, 1.1, 1.2, 1.3, -1.1, -1.2, -1.3, 1.1, 1.2, 1.3, -1.1, -1.2, -1.3, 1.1, 1.2}, {3.1, 3.2, 3.3, -3.1, -3.2, -3.3, 1.1, 1.2, 1.3, -1.1, -1.2, -1.3, 1.1, 1.2, 1.3, -1.1, -1.2, -1.3, 1.1, 1.2}};
+
 struct V0ptHadPiKaProt {
+
+  // ITS response
+  o2::aod::ITSResponse itsResponse;
+  // Connect to ccdb
+  Service<ccdb::BasicCCDBManager> ccdb;
+  Configurable<int64_t> ccdbNoLaterThan{"ccdbNoLaterThan", std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count(), "latest acceptable timestamp of creation for the object"};
+  Configurable<std::string> ccdbUrl{"ccdbUrl", "http://ccdb-test.cern.ch:8080", "url of the ccdb repository"};
+
+  enum Particles {
+    PIONS = 0,
+    KAONS,
+    PROTONS
+  };
+  enum ParticleNsigma {
+    kPionUpCut = 0,
+    kKaonUpCut,
+    kProtonUpCut,
+    kPionLowCut,
+    kKaonLowCut,
+    kProtonLowCut
+  };
+  enum DetectorType {
+    kTPC = 0,
+    kTOF,
+    kITS
+  };
+  enum CentralityEstimator {
+    kFT0C = 0,
+    kFT0A,
+    kFT0M,
+    kFV0A
+  };
 
   Configurable<float> cfgCutVertex{"cfgCutVertex", 10.0f, "Accepted z-vertex range"};
   Configurable<float> cfgCutTpcChi2NCl{"cfgCutTpcChi2NCl", 2.5f, "Maximum TPCchi2NCl"};
@@ -87,17 +124,23 @@ struct V0ptHadPiKaProt {
   Configurable<float> cfgCutEtaLeft{"cfgCutEtaLeft", 0.8f, "Left end of eta gap"};
   Configurable<float> cfgCutEtaRight{"cfgCutEtaRight", 0.8f, "Right end of eta gap"};
   Configurable<int> cfgNSubsample{"cfgNSubsample", 10, "Number of subsamples"};
-  Configurable<int> cfgCentralityChoice{"cfgCentralityChoice", 1, "Which centrality estimator? 0-->FT0M, 1-->FT0C"};
+  Configurable<int> cfgCentralityChoice{"cfgCentralityChoice", 0, "Which centrality estimator? 0-->FT0C, 1-->FT0A, 2-->FT0M, 3-->FV0A"};
   Configurable<bool> cfgEvSelkNoSameBunchPileup{"cfgEvSelkNoSameBunchPileup", true, "Pileup removal"};
   Configurable<bool> cfgUseGoodITSLayerAllCut{"cfgUseGoodITSLayerAllCut", true, "Remove time interval with dead ITS zone"};
-
-  // Connect to ccdb
-  Service<ccdb::BasicCCDBManager> ccdb;
-  Configurable<int64_t> ccdbNoLaterThan{"ccdbNoLaterThan", std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count(), "latest acceptable timestamp of creation for the object"};
-  Configurable<std::string> ccdbUrl{"ccdbUrl", "http://ccdb-test.cern.ch:8080", "url of the ccdb repository"};
+  Configurable<bool> cfgEvSelkNoITSROFrameBorder{"cfgEvSelkNoITSROFrameBorder", true, "ITSROFrame border event selection cut"};
+  Configurable<bool> cfgEvSelkNoTimeFrameBorder{"cfgEvSelkNoTimeFrameBorder", true, "TimeFrame border event selection cut"};
+  Configurable<bool> cfgEvSelUseGoodZvtxFT0vsPV{"cfgEvSelUseGoodZvtxFT0vsPV", true, "GoodZvertex and FT0 vs PV cut"};
+  Configurable<bool> cfgUseItsPID{"cfgUseItsPID", false, "Use ITS PID for particle identification"};
+  Configurable<float> cfgPtCutTOF{"cfgPtCutTOF", 0.3f, "Minimum pt to use TOF N-sigma"};
+  Configurable<LabeledArray<float>> nSigmas{"nSigmas", {LongArrayFloat[0], 3, 6, {"TPC", "TOF", "ITS"}, {"pos_pi", "pos_ka", "pos_pr", "neg_pi", "neg_ka", "neg_pr"}}, "Labeled array for n-sigma values for TPC, TOF, ITS for pions, kaons, protons (positive and negative)"};
+  Configurable<bool> cfgUseRun3V2PID{"cfgUseRun3V2PID", true, "True if PID cuts to be used are similar to Run3 v2 PID analysis"};
+  Configurable<int> cfgNbinsV02pt{"cfgNbinsV02pt", 14, "No. of pT bins for v02(pT) analysis"};
+  Configurable<float> cfgCutPtMaxForV02{"cfgCutPtMaxForV02", 3.0f, "Max. pT for v02(pT)"};
+  Configurable<float> cfgCutEtaWindowB{"cfgCutEtaWindowB", 0.4f, "value of x in |eta|<x for window B"};
 
   HistogramRegistry histos{"Histos", {}, OutputObjHandlingPolicy::AnalysisObject};
   std::vector<std::vector<std::shared_ptr<TProfile2D>>> subSample;
+  std::vector<std::vector<std::shared_ptr<TProfile2D>>> subSampleV02;
   TRandom3* funRndm = new TRandom3(0);
 
   // Filter command***********
@@ -108,9 +151,35 @@ struct V0ptHadPiKaProt {
   using AodCollisions = soa::Filtered<soa::Join<aod::Collisions, aod::EvSels, aod::CentFV0As, aod::CentFT0Ms, aod::CentFT0As, aod::CentFT0Cs, aod::CentFDDMs, aod::Mults>>;
   using AodTracks = soa::Filtered<soa::Join<aod::Tracks, aod::TrackSelection, aod::TracksExtra, aod::TracksDCA, aod::pidTPCFullPr, aod::pidTOFFullPr, aod::pidTPCFullKa, aod::pidTOFFullKa, aod::pidTPCFullPi, aod::pidTOFFullPi, aod::pidTPCFullEl, aod::pidTOFFullEl>>;
 
+  std::array<float, 6> tofNsigmaCut;
+  std::array<float, 6> itsNsigmaCut;
+  std::array<float, 6> tpcNsigmaCut;
+
   // Equivalent of the AliRoot task UserCreateOutputObjects
   void init(o2::framework::InitContext&)
   {
+    // Get nSigma values of TPC, TOF, ITS for various particles from the matrix "nSigmas"
+    tpcNsigmaCut[kPionUpCut] = nSigmas->getData()[kTPC][kPionUpCut];
+    tpcNsigmaCut[kKaonUpCut] = nSigmas->getData()[kTPC][kKaonUpCut];
+    tpcNsigmaCut[kProtonUpCut] = nSigmas->getData()[kTPC][kProtonUpCut];
+    tpcNsigmaCut[kPionLowCut] = nSigmas->getData()[kTPC][kPionLowCut];
+    tpcNsigmaCut[kKaonLowCut] = nSigmas->getData()[kTPC][kKaonLowCut];
+    tpcNsigmaCut[kProtonLowCut] = nSigmas->getData()[kTPC][kProtonLowCut];
+
+    tofNsigmaCut[kPionUpCut] = nSigmas->getData()[kTOF][kPionUpCut];
+    tofNsigmaCut[kKaonUpCut] = nSigmas->getData()[kTOF][kKaonUpCut];
+    tofNsigmaCut[kProtonUpCut] = nSigmas->getData()[kTOF][kProtonUpCut];
+    tofNsigmaCut[kPionLowCut] = nSigmas->getData()[kTOF][kPionLowCut];
+    tofNsigmaCut[kKaonLowCut] = nSigmas->getData()[kTOF][kKaonLowCut];
+    tofNsigmaCut[kProtonLowCut] = nSigmas->getData()[kTOF][kProtonLowCut];
+
+    itsNsigmaCut[kPionUpCut] = nSigmas->getData()[kITS][kPionUpCut];
+    itsNsigmaCut[kKaonUpCut] = nSigmas->getData()[kITS][kKaonUpCut];
+    itsNsigmaCut[kProtonUpCut] = nSigmas->getData()[kITS][kProtonUpCut];
+    itsNsigmaCut[kPionLowCut] = nSigmas->getData()[kITS][kPionLowCut];
+    itsNsigmaCut[kKaonLowCut] = nSigmas->getData()[kITS][kKaonLowCut];
+    itsNsigmaCut[kProtonLowCut] = nSigmas->getData()[kITS][kProtonLowCut];
+
     // Define axes
     std::vector<double> ptBin = {0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.4, 1.6, 1.8, 2.0, 2.2, 2.4, 2.6, 2.8, 3.0, 3.5, 4.0, 5.0, 6.0, 8.0, 10.0};
     AxisSpec ptAxis = {ptBin, "#it{p}_{T} (GeV/#it{c})"};
@@ -180,10 +249,23 @@ struct V0ptHadPiKaProt {
     histos.add("Prof_Bone_prot", "", {HistType::kTProfile2D, {centAxis, noAxis}});
     histos.add("Prof_Btwo_prot", "", {HistType::kTProfile2D, {centAxis, noAxis}});
 
+    // Analysis profile for v02(pT)
+    histos.add("Prof_XY", "", {HistType::kTProfile2D, {centAxis, noAxis}});
+    histos.add("Prof_XYZ_had", "", {HistType::kTProfile2D, {centAxis, ptAxis}});
+    histos.add("Prof_Z_had", "", {HistType::kTProfile2D, {centAxis, ptAxis}});
+    histos.add("Prof_XYZ_pi", "", {HistType::kTProfile2D, {centAxis, ptAxis}});
+    histos.add("Prof_Z_pi", "", {HistType::kTProfile2D, {centAxis, ptAxis}});
+    histos.add("Prof_XYZ_ka", "", {HistType::kTProfile2D, {centAxis, ptAxis}});
+    histos.add("Prof_Z_ka", "", {HistType::kTProfile2D, {centAxis, ptAxis}});
+    histos.add("Prof_XYZ_prot", "", {HistType::kTProfile2D, {centAxis, ptAxis}});
+    histos.add("Prof_Z_prot", "", {HistType::kTProfile2D, {centAxis, ptAxis}});
+
     // initial array
     subSample.resize(cfgNSubsample);
+    subSampleV02.resize(cfgNSubsample);
     for (int i = 0; i < cfgNSubsample; i++) {
       subSample[i].resize(20);
+      subSampleV02[i].resize(20);
     }
     for (int i = 0; i < cfgNSubsample; i++) {
       subSample[i][0] = std::get<std::shared_ptr<TProfile2D>>(histos.add(Form("subSample_%d/Prof_A_had", i), "", {HistType::kTProfile2D, {centAxis, ptAxis}}));
@@ -209,6 +291,16 @@ struct V0ptHadPiKaProt {
       subSample[i][17] = std::get<std::shared_ptr<TProfile2D>>(histos.add(Form("subSample_%d/Prof_D_prot", i), "", {HistType::kTProfile2D, {centAxis, noAxis}}));
       subSample[i][18] = std::get<std::shared_ptr<TProfile2D>>(histos.add(Form("subSample_%d/Prof_Bone_prot", i), "", {HistType::kTProfile2D, {centAxis, noAxis}}));
       subSample[i][19] = std::get<std::shared_ptr<TProfile2D>>(histos.add(Form("subSample_%d/Prof_Btwo_prot", i), "", {HistType::kTProfile2D, {centAxis, noAxis}}));
+
+      subSampleV02[i][0] = std::get<std::shared_ptr<TProfile2D>>(histos.add(Form("subSampleV02_%d/Prof_XY", i), "", {HistType::kTProfile2D, {centAxis, noAxis}}));
+      subSampleV02[i][1] = std::get<std::shared_ptr<TProfile2D>>(histos.add(Form("subSampleV02_%d/Prof_XYZ_had", i), "", {HistType::kTProfile2D, {centAxis, ptAxis}}));
+      subSampleV02[i][2] = std::get<std::shared_ptr<TProfile2D>>(histos.add(Form("subSampleV02_%d/Prof_Z_had", i), "", {HistType::kTProfile2D, {centAxis, ptAxis}}));
+      subSampleV02[i][3] = std::get<std::shared_ptr<TProfile2D>>(histos.add(Form("subSampleV02_%d/Prof_XYZ_pi", i), "", {HistType::kTProfile2D, {centAxis, ptAxis}}));
+      subSampleV02[i][4] = std::get<std::shared_ptr<TProfile2D>>(histos.add(Form("subSampleV02_%d/Prof_Z_pi", i), "", {HistType::kTProfile2D, {centAxis, ptAxis}}));
+      subSampleV02[i][5] = std::get<std::shared_ptr<TProfile2D>>(histos.add(Form("subSampleV02_%d/Prof_XYZ_ka", i), "", {HistType::kTProfile2D, {centAxis, ptAxis}}));
+      subSampleV02[i][6] = std::get<std::shared_ptr<TProfile2D>>(histos.add(Form("subSampleV02_%d/Prof_Z_ka", i), "", {HistType::kTProfile2D, {centAxis, ptAxis}}));
+      subSampleV02[i][1] = std::get<std::shared_ptr<TProfile2D>>(histos.add(Form("subSampleV02_%d/Prof_XYZ_prot", i), "", {HistType::kTProfile2D, {centAxis, ptAxis}}));
+      subSampleV02[i][2] = std::get<std::shared_ptr<TProfile2D>>(histos.add(Form("subSampleV02_%d/Prof_Z_prot", i), "", {HistType::kTProfile2D, {centAxis, ptAxis}}));
     }
   } // end init
 
@@ -330,6 +422,56 @@ struct V0ptHadPiKaProt {
       return false;
   }
 
+  template <typename TTrack>
+  int getNsigmaPID(TTrack track)
+  {
+    // Computing Nsigma arrays for pion, kaon, and protons
+    std::array<float, 3> nSigmaTPC = {track.tpcNSigmaPi(), track.tpcNSigmaKa(), track.tpcNSigmaPr()};
+    std::array<float, 3> nSigmaTOF = {track.tofNSigmaPi(), track.tofNSigmaKa(), track.tofNSigmaPr()};
+    std::array<float, 3> nSigmaITS = {itsResponse.nSigmaITS<o2::track::PID::Pion>(track), itsResponse.nSigmaITS<o2::track::PID::Kaon>(track), itsResponse.nSigmaITS<o2::track::PID::Proton>(track)};
+    int pid = 0; // 0 = not identified, 1 = pion, 2 = kaon, 3 = proton
+
+    std::array<float, 3> nSigmaToUse = cfgUseItsPID ? nSigmaITS : nSigmaTPC;             // Choose which nSigma to use: TPC or ITS
+    std::array<float, 6> detectorNsigmaCut = cfgUseItsPID ? itsNsigmaCut : tpcNsigmaCut; // Choose which nSigma to use: TPC or ITS
+
+    bool isPion, isKaon, isProton;
+    bool isDetectedPion = nSigmaToUse[PIONS] < detectorNsigmaCut[kPionUpCut] && nSigmaToUse[PIONS] > detectorNsigmaCut[kPionLowCut];
+    bool isDetectedKaon = nSigmaToUse[KAONS] < detectorNsigmaCut[kKaonUpCut] && nSigmaToUse[KAONS] > detectorNsigmaCut[kKaonLowCut];
+    bool isDetectedProton = nSigmaToUse[PROTONS] < detectorNsigmaCut[kProtonUpCut] && nSigmaToUse[PROTONS] > detectorNsigmaCut[kProtonLowCut];
+
+    bool isTofPion = nSigmaTOF[PIONS] < tofNsigmaCut[kPionUpCut] && nSigmaTOF[PIONS] > tofNsigmaCut[kPionLowCut];
+    bool isTofKaon = nSigmaTOF[KAONS] < tofNsigmaCut[kKaonUpCut] && nSigmaTOF[KAONS] > tofNsigmaCut[kKaonLowCut];
+    bool isTofProton = nSigmaTOF[PROTONS] < tofNsigmaCut[kProtonUpCut] && nSigmaTOF[PROTONS] > tofNsigmaCut[kProtonLowCut];
+
+    if (track.pt() > cfgPtCutTOF && !track.hasTOF()) {
+      return 0;
+    } else if (track.pt() > cfgPtCutTOF && track.hasTOF()) {
+      isPion = isTofPion && isDetectedPion;
+      isKaon = isTofKaon && isDetectedKaon;
+      isProton = isTofProton && isDetectedProton;
+    } else {
+      isPion = isDetectedPion;
+      isKaon = isDetectedKaon;
+      isProton = isDetectedProton;
+    }
+
+    if ((isPion && isKaon) || (isPion && isProton) || (isKaon && isProton)) {
+      return 0; // more than one particle satisfy the criteria
+    }
+
+    if (isPion) {
+      pid = PIONS + 1;
+    } else if (isKaon) {
+      pid = KAONS + 1;
+    } else if (isProton) {
+      pid = PROTONS + 1;
+    } else {
+      return 0; // no particle satisfies the criteria
+    }
+
+    return pid; // 0 = not identified, 1 = pion, 2 = kaon, 3 = proton
+  }
+
   // process Data
   void process(AodCollisions::iterator const& coll, aod::BCsWithTimestamps const&, AodTracks const& inputTracks)
   {
@@ -342,20 +484,33 @@ struct V0ptHadPiKaProt {
     if (cfgEvSelkNoSameBunchPileup && !(coll.selection_bit(o2::aod::evsel::kNoSameBunchPileup))) {
       return;
     }
+    if (cfgEvSelkNoITSROFrameBorder && !(coll.selection_bit(o2::aod::evsel::kNoITSROFrameBorder))) {
+      return;
+    }
+    if (cfgEvSelkNoTimeFrameBorder && !(coll.selection_bit(o2::aod::evsel::kNoTimeFrameBorder))) {
+      return;
+    }
+    if (cfgEvSelUseGoodZvtxFT0vsPV && !(coll.selection_bit(o2::aod::evsel::kIsGoodZvtxFT0vsPV))) {
+      return;
+    }
 
     // Centrality
     double cent = 0.0;
-    if (cfgCentralityChoice == 0)
+    if (cfgCentralityChoice == kFT0C)
+      cent = coll.centFT0C();
+    else if (cfgCentralityChoice == kFT0A)
+      cent = coll.centFT0A();
+    else if (cfgCentralityChoice == kFT0M)
       cent = coll.centFT0M();
-    else if (cfgCentralityChoice == 1)
-      cent = coll.centFT0M();
+    else if (cfgCentralityChoice == kFV0A)
+      cent = coll.centFV0A();
 
     histos.fill(HIST("hZvtx_after_sel"), coll.posZ());
     histos.fill(HIST("hCentrality"), cent);
     histos.fill(HIST("Hist2D_globalTracks_PVTracks"), coll.multNTracksPV(), inputTracks.size());
     histos.fill(HIST("Hist2D_cent_nch"), inputTracks.size(), cent);
 
-    // Analysis variables
+    // Analysis variables for v0(pT)
     int nbinsHad = 20;
     int nbinsPid = 18;
     double binsarray[21] = {0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.4, 1.6, 1.8, 2.0, 2.2, 2.4, 2.6, 2.8, 3.0, 3.5, 4.0, 5.0, 6.0, 8.0, 10.0};
@@ -370,6 +525,18 @@ struct V0ptHadPiKaProt {
     double nSumEtaLeftPi = 0.0;
     double nSumEtaLeftKa = 0.0;
     double nSumEtaLeftProt = 0.0;
+
+    // Analysis variables for v02(pT)
+    TH1D* fPtProfileHadInWinB = new TH1D("fPtProfileHadInWinB", "fPtProfileHadInWinB", 20, binsarray);
+    TH1D* fPtProfilePiInWinB = new TH1D("fPtProfilePiInWinB", "fPtProfilePiInWinB", 20, binsarray);
+    TH1D* fPtProfileKaInWinB = new TH1D("fPtProfileKaInWinB", "fPtProfileKaInWinB", 20, binsarray);
+    TH1D* fPtProfileProtInWinB = new TH1D("fPtProfileProtInWinB", "fPtProfileProtInWinB", 20, binsarray);
+    double nSumInWinB = 0.0; // for Z = f(pT) = n(pT)/N_B in window B
+
+    double nSumInWinA = 0.0; // for X (in window A) to calculate v2^2
+    double nSumInWinC = 0.0; // for Y (in window C) to calculate v2^2
+    TComplex vecQInWinA = TComplex(0., 0.);
+    TComplex vecQInWinC = TComplex(0., 0.);
 
     for (const auto& track : inputTracks) { // Loop over tracks
 
@@ -394,6 +561,7 @@ struct V0ptHadPiKaProt {
 
       double trkPt = track.pt();
       double trkEta = track.eta();
+      double trkPhi = track.phi();
 
       // inclusive charged particles
       if (track.sign() != 0) {
@@ -405,6 +573,29 @@ struct V0ptHadPiKaProt {
         if (trkEta > cfgCutEtaRight) {
           pTsumEtaRightHad += trkPt;
           nSumEtaRightHad += 1.0;
+        }
+      }
+
+      // fill subevent B for f(pT) in v02(pT)
+      if (track.sign() != 0 && trkPt < cfgCutPtMaxForV02) {
+        if (std::abs(trkEta) < cfgCutEtaWindowB) {
+          fPtProfileHadInWinB->Fill(trkPt);
+          nSumInWinB += 1.0;
+        }
+      }
+      double phiweight = 1.0;
+      // fill subevent C for v2^2 in v02(pT)
+      if (track.sign() != 0 && trkPt < cfgCutPtMaxForV02) {
+        if (cfgCutEtaWindowB < trkEta && trkEta < 0.8) {
+          vecQInWinC += phiweight * TComplex(TMath::Cos(2. * trkPhi), TMath::Sin(2. * trkPhi));
+          nSumInWinC += phiweight;
+        }
+      }
+      // fill subevent A for v2^2 in v02(pT)
+      if (track.sign() != 0 && trkPt < cfgCutPtMaxForV02) {
+        if (-0.8 < trkEta && trkEta < -1.0 * cfgCutEtaWindowB) {
+          vecQInWinA += phiweight * TComplex(TMath::Cos(2. * trkPhi), TMath::Sin(2. * trkPhi));
+          nSumInWinA += phiweight;
         }
       }
 
@@ -426,9 +617,23 @@ struct V0ptHadPiKaProt {
       histos.fill(HIST("h2DnsigmaProtonTpcVsTofBeforeCut"), nSigmaTpcProt, nSigmaTofProt);
 
       // identified particles selection
-      bool isPion = selectionPion(track);
-      bool isKaon = selectionKaon(track);
-      bool isProton = selectionProton(track);
+      bool isPion = false;
+      bool isKaon = false;
+      bool isProton = false;
+
+      if (cfgUseRun3V2PID) {
+        int pidVal = getNsigmaPID(track);
+        if (pidVal == PIONS + 1)
+          isPion = true;
+        if (pidVal == KAONS + 1)
+          isKaon = true;
+        if (pidVal == PROTONS + 1)
+          isProton = true;
+      } else {
+        isPion = selectionPion(track);
+        isKaon = selectionKaon(track);
+        isProton = selectionProton(track);
+      }
 
       // PID QAs after selection
       if (isPion) {
@@ -466,6 +671,21 @@ struct V0ptHadPiKaProt {
         }
       }
 
+      // fill subevent B for ***identified particles'*** f(pT) in v02(pT)
+      if (track.sign() != 0 && trkPt < cfgCutPtMaxForV02) {
+        if (std::abs(trkEta) < cfgCutEtaWindowB) {
+          if (isPion) {
+            fPtProfilePiInWinB->Fill(trkPt);
+          }
+          if (isKaon) {
+            fPtProfileKaInWinB->Fill(trkPt);
+          }
+          if (isProton && trkPt > cfgCutPtLowerProt) {
+            fPtProfileProtInWinB->Fill(trkPt);
+          }
+        }
+      }
+
     } // End track loop
 
     // selecting subsample and filling profiles
@@ -483,7 +703,6 @@ struct V0ptHadPiKaProt {
         subSample[sampleIndex][0]->Fill(cent, fPtProfileHad->GetBinCenter(i + 1), (fPtProfileHad->GetBinContent(i + 1) / nSumEtaLeftHad));
         subSample[sampleIndex][1]->Fill(cent, fPtProfileHad->GetBinCenter(i + 1), ((fPtProfileHad->GetBinContent(i + 1) / nSumEtaLeftHad) * (pTsumEtaRightHad / nSumEtaRightHad)));
         subSample[sampleIndex][2]->Fill(cent, 0.5, ((pTsumEtaLeftHad / nSumEtaLeftHad) * (pTsumEtaRightHad / nSumEtaRightHad)));
-        ;
         subSample[sampleIndex][3]->Fill(cent, 0.5, (pTsumEtaLeftHad / nSumEtaLeftHad));
         subSample[sampleIndex][4]->Fill(cent, 0.5, (pTsumEtaRightHad / nSumEtaRightHad));
       }
@@ -500,7 +719,6 @@ struct V0ptHadPiKaProt {
         subSample[sampleIndex][5]->Fill(cent, fPtProfilePi->GetBinCenter(i + 1), (fPtProfilePi->GetBinContent(i + 1) / nSumEtaLeftPi));
         subSample[sampleIndex][6]->Fill(cent, fPtProfilePi->GetBinCenter(i + 1), ((fPtProfilePi->GetBinContent(i + 1) / nSumEtaLeftPi) * (pTsumEtaRightHad / nSumEtaRightHad)));
         subSample[sampleIndex][7]->Fill(cent, 0.5, ((pTsumEtaLeftHad / nSumEtaLeftHad) * (pTsumEtaRightHad / nSumEtaRightHad)));
-        ;
         subSample[sampleIndex][8]->Fill(cent, 0.5, (pTsumEtaLeftHad / nSumEtaLeftHad));
         subSample[sampleIndex][9]->Fill(cent, 0.5, (pTsumEtaRightHad / nSumEtaRightHad));
       }
@@ -517,7 +735,6 @@ struct V0ptHadPiKaProt {
         subSample[sampleIndex][10]->Fill(cent, fPtProfileKa->GetBinCenter(i + 1), (fPtProfileKa->GetBinContent(i + 1) / nSumEtaLeftKa));
         subSample[sampleIndex][11]->Fill(cent, fPtProfileKa->GetBinCenter(i + 1), ((fPtProfileKa->GetBinContent(i + 1) / nSumEtaLeftKa) * (pTsumEtaRightHad / nSumEtaRightHad)));
         subSample[sampleIndex][12]->Fill(cent, 0.5, ((pTsumEtaLeftHad / nSumEtaLeftHad) * (pTsumEtaRightHad / nSumEtaRightHad)));
-        ;
         subSample[sampleIndex][13]->Fill(cent, 0.5, (pTsumEtaLeftHad / nSumEtaLeftHad));
         subSample[sampleIndex][14]->Fill(cent, 0.5, (pTsumEtaRightHad / nSumEtaRightHad));
       }
@@ -533,9 +750,60 @@ struct V0ptHadPiKaProt {
         subSample[sampleIndex][15]->Fill(cent, fPtProfileProt->GetBinCenter(i + 1), (fPtProfileProt->GetBinContent(i + 1) / nSumEtaLeftProt));
         subSample[sampleIndex][16]->Fill(cent, fPtProfileProt->GetBinCenter(i + 1), ((fPtProfileProt->GetBinContent(i + 1) / nSumEtaLeftProt) * (pTsumEtaRightHad / nSumEtaRightHad)));
         subSample[sampleIndex][17]->Fill(cent, 0.5, ((pTsumEtaLeftHad / nSumEtaLeftHad) * (pTsumEtaRightHad / nSumEtaRightHad)));
-        ;
         subSample[sampleIndex][18]->Fill(cent, 0.5, (pTsumEtaLeftHad / nSumEtaLeftHad));
         subSample[sampleIndex][19]->Fill(cent, 0.5, (pTsumEtaRightHad / nSumEtaRightHad));
+      }
+    }
+
+    if (nSumInWinA > 4 && nSumInWinB > 4 && nSumInWinC > 4) {
+      double twoParCorr = (vecQInWinA * TComplex::Conjugate(vecQInWinC)).Re();
+      twoParCorr *= 1.0 / (nSumInWinA * nSumInWinC);
+      histos.get<TProfile2D>(HIST("Prof_XY"))->Fill(cent, 0.5, twoParCorr);
+
+      subSampleV02[sampleIndex][0]->Fill(cent, 0.5, twoParCorr);
+
+      // hadrons
+      for (int i = 0; i < cfgNbinsV02pt; i++) {
+        double threeParCorrHad = (vecQInWinA * TComplex::Conjugate(vecQInWinC) * fPtProfileHadInWinB->GetBinContent(i + 1)).Re();
+        threeParCorrHad *= 1.0 / (nSumInWinA * nSumInWinC * nSumInWinB);
+        histos.get<TProfile2D>(HIST("Prof_XYZ_had"))->Fill(cent, fPtProfileHadInWinB->GetBinCenter(i + 1), threeParCorrHad);
+        histos.get<TProfile2D>(HIST("Prof_Z_had"))->Fill(cent, fPtProfileHadInWinB->GetBinCenter(i + 1), (fPtProfileHadInWinB->GetBinContent(i + 1) / nSumInWinB));
+
+        subSampleV02[sampleIndex][1]->Fill(cent, fPtProfileHadInWinB->GetBinCenter(i + 1), threeParCorrHad);
+        subSampleV02[sampleIndex][2]->Fill(cent, fPtProfileHadInWinB->GetBinCenter(i + 1), (fPtProfileHadInWinB->GetBinContent(i + 1) / nSumInWinB));
+      }
+
+      // pions
+      for (int i = 0; i < cfgNbinsV02pt; i++) {
+        double threeParCorrPi = (vecQInWinA * TComplex::Conjugate(vecQInWinC) * fPtProfilePiInWinB->GetBinContent(i + 1)).Re();
+        threeParCorrPi *= 1.0 / (nSumInWinA * nSumInWinC * nSumInWinB);
+        histos.get<TProfile2D>(HIST("Prof_XYZ_pi"))->Fill(cent, fPtProfilePiInWinB->GetBinCenter(i + 1), threeParCorrPi);
+        histos.get<TProfile2D>(HIST("Prof_Z_pi"))->Fill(cent, fPtProfilePiInWinB->GetBinCenter(i + 1), (fPtProfilePiInWinB->GetBinContent(i + 1) / nSumInWinB));
+
+        subSampleV02[sampleIndex][1]->Fill(cent, fPtProfilePiInWinB->GetBinCenter(i + 1), threeParCorrPi);
+        subSampleV02[sampleIndex][2]->Fill(cent, fPtProfilePiInWinB->GetBinCenter(i + 1), (fPtProfilePiInWinB->GetBinContent(i + 1) / nSumInWinB));
+      }
+
+      // kaons
+      for (int i = 0; i < cfgNbinsV02pt; i++) {
+        double threeParCorrKa = (vecQInWinA * TComplex::Conjugate(vecQInWinC) * fPtProfileKaInWinB->GetBinContent(i + 1)).Re();
+        threeParCorrKa *= 1.0 / (nSumInWinA * nSumInWinC * nSumInWinB);
+        histos.get<TProfile2D>(HIST("Prof_XYZ_ka"))->Fill(cent, fPtProfileKaInWinB->GetBinCenter(i + 1), threeParCorrKa);
+        histos.get<TProfile2D>(HIST("Prof_Z_ka"))->Fill(cent, fPtProfileKaInWinB->GetBinCenter(i + 1), (fPtProfileKaInWinB->GetBinContent(i + 1) / nSumInWinB));
+
+        subSampleV02[sampleIndex][1]->Fill(cent, fPtProfileKaInWinB->GetBinCenter(i + 1), threeParCorrKa);
+        subSampleV02[sampleIndex][2]->Fill(cent, fPtProfileKaInWinB->GetBinCenter(i + 1), (fPtProfileKaInWinB->GetBinContent(i + 1) / nSumInWinB));
+      }
+
+      // protons
+      for (int i = 1; i < cfgNbinsV02pt; i++) {
+        double threeParCorrProt = (vecQInWinA * TComplex::Conjugate(vecQInWinC) * fPtProfileProtInWinB->GetBinContent(i + 1)).Re();
+        threeParCorrProt *= 1.0 / (nSumInWinA * nSumInWinC * nSumInWinB);
+        histos.get<TProfile2D>(HIST("Prof_XYZ_prot"))->Fill(cent, fPtProfileProtInWinB->GetBinCenter(i + 1), threeParCorrProt);
+        histos.get<TProfile2D>(HIST("Prof_Z_prot"))->Fill(cent, fPtProfileProtInWinB->GetBinCenter(i + 1), (fPtProfileProtInWinB->GetBinContent(i + 1) / nSumInWinB));
+
+        subSampleV02[sampleIndex][1]->Fill(cent, fPtProfileProtInWinB->GetBinCenter(i + 1), threeParCorrProt);
+        subSampleV02[sampleIndex][2]->Fill(cent, fPtProfileProtInWinB->GetBinCenter(i + 1), (fPtProfileProtInWinB->GetBinContent(i + 1) / nSumInWinB));
       }
     }
 
@@ -543,6 +811,11 @@ struct V0ptHadPiKaProt {
     fPtProfilePi->Delete();
     fPtProfileKa->Delete();
     fPtProfileProt->Delete();
+
+    fPtProfileHadInWinB->Delete();
+    fPtProfilePiInWinB->Delete();
+    fPtProfileKaInWinB->Delete();
+    fPtProfileProtInWinB->Delete();
 
   } // End process loop
 };

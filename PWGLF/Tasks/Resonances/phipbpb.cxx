@@ -20,8 +20,9 @@
 #include "Common/DataModel/Centrality.h"
 #include "Common/DataModel/EventSelection.h"
 #include "Common/DataModel/Multiplicity.h"
-#include "Common/DataModel/PIDResponse.h"
 #include "Common/DataModel/PIDResponseITS.h"
+#include "Common/DataModel/PIDResponseTOF.h"
+#include "Common/DataModel/PIDResponseTPC.h"
 #include "Common/DataModel/TrackSelectionTables.h"
 
 #include "CCDB/BasicCCDBManager.h"
@@ -46,6 +47,7 @@
 #include <TDatabasePDG.h>
 #include <TDirectory.h>
 #include <TFile.h>
+#include <TGenPhaseSpace.h>
 #include <TH1F.h>
 #include <TH2F.h>
 #include <THn.h>
@@ -91,7 +93,7 @@ struct phipbpb {
   Configurable<bool> fillSA{"fillSA", false, "fill spin alignment"};
   // events
   Configurable<float> cfgCutVertex{"cfgCutVertex", 10.0f, "Accepted z-vertex range"};
-  Configurable<float> cfgCutCentrality{"cfgCutCentrality", 80.0f, "Accepted maximum Centrality"};
+  Configurable<float> cfgCutCentrality{"cfgCutCentrality", 100.0f, "Accepted maximum Centrality"};
   Configurable<int> cfgCutOccupancy{"cfgCutOccupancy", 3000, "Occupancy cut"};
   // track
   Configurable<bool> cqvas{"cqvas", false, "change q vectors after shift correction"};
@@ -196,6 +198,9 @@ struct phipbpb {
     AxisSpec centAxis = {8, 0, 80, "V0M (%)"};
     AxisSpec occupancyAxis = {occupancyBinning, "Occupancy"};
     AxisSpec spAxis = {spNbins, lbinsp, hbinsp, "Sp"};
+    histos.add("hImpactParameterVsEvrStatusGen", "hImpactParameterVsEvrStatusGen", HistType::kTH2F, {{200, 0.0, 20.0}, {5, 0.0, 5.0}}, true);
+    histos.add("hImpactParameterVsEvrStatusRec", "hImpactParameterVsEvrStatusRec", HistType::kTH3F, {{200, 0.0, 20.0}, {100, 0.0, 100.0}, {10, 0.0, 10.0}}, true);
+    histos.add("hINumRecCollisionVsEvrStatusRec", "hINumRecCollisionVsEvrStatusRec", HistType::kTH3F, {{21, -0.5, 20.5}, {100, 0.0, 100.0}, {10, 0.0, 10.0}}, true);
 
     if (fillv1) {
       histos.add("hpQxtQxpvscent", "hpQxtQxpvscent", HistType::kTHnSparseF, {cnfgaxis.configThnAxisCentrality, spAxis}, true);
@@ -230,6 +235,12 @@ struct phipbpb {
     histos.add("hVtxZ", "Vertex distribution in Z;Z (cm)", kTH1F, {{400, -20.0, 20.0}});
 
     if (!fillv1) {
+
+      histos.add("hKaonpIsotropic", "hKaonpIsotropic", HistType::kTHnSparseD, {{8, 0.0, 80.0}, {100, 0.0, 10.0}, {8, -0.8, 0.8}, {36, 0.0, TMath::Pi()}});
+      histos.add("hKaonpData", "hKaonpData", HistType::kTHnSparseD, {{8, 0.0, 80.0}, {100, 0.0, 10.0}, {8, -0.8, 0.8}, {36, 0.0, TMath::Pi()}});
+      histos.add("hKaonmIsotropic", "hKaonmIsotropic", HistType::kTHnSparseD, {{8, 0.0, 80.0}, {100, 0.0, 10.0}, {8, -0.8, 0.8}, {36, 0.0, TMath::Pi()}});
+      histos.add("hKaonmData", "hKaonmData", HistType::kTHnSparseD, {{8, 0.0, 80.0}, {100, 0.0, 10.0}, {8, -0.8, 0.8}, {36, 0.0, TMath::Pi()}});
+
       histos.add("hTPCglobalmomcorr", "Momentum correlation", kTH3F, {{200, -10.0f, 10.0f}, {200, -10.0f, 10.0f}, {8, 0.0f, 80.0f}});
       histos.add("hpTvsRapidity", "pT vs Rapidity", kTH2F, {{100, 0.0f, 10.0f}, {300, -1.5f, 1.5f}});
       histos.add("hFTOCvsTPCNoCut", "Mult correlation FT0C vs. TPC without any cut", kTH2F, {{80, 0.0f, 80.0f}, {100, -0.5f, 5999.5f}});
@@ -501,6 +512,24 @@ struct phipbpb {
     return false;
   }
 
+  void fillHisoWithTGenPS(const ROOT::Math::PxPyPzMVector& Pphi_lab, double psi2, double ptMin, double etaMax, double centrality)
+  {
+    TLorentzVector parent;
+    double masses[2] = {0.493, 0.493};
+    parent.SetPxPyPzE(Pphi_lab.Px(), Pphi_lab.Py(), Pphi_lab.Pz(), Pphi_lab.E());
+    TGenPhaseSpace gen;
+    gen.SetDecay(parent, 2, masses);
+    gen.Generate();
+
+    TLorentzVector* K1 = gen.GetDecay(0);
+    TLorentzVector* K2 = gen.GetDecay(1);
+
+    if (K1->Pt() > ptMin && std::abs(K1->Eta()) < etaMax)
+      histos.fill(HIST("hKaonpIsotropic"), centrality, K1->Pt(), K1->Eta(), GetPhiInRange(K1->Phi() - psi2));
+    if (K2->Pt() > ptMin && std::abs(K2->Eta()) < etaMax)
+      histos.fill(HIST("hKaonmIsotropic"), centrality, K2->Pt(), K2->Eta(), GetPhiInRange(K2->Phi() - psi2));
+  }
+
   ConfigurableAxis axisVertex{"axisVertex", {20, -10, 10}, "vertex axis for bin"};
   ConfigurableAxis axisMultiplicityClass{"axisMultiplicityClass", {20, 0, 100}, "multiplicity percentile for bin"};
   ConfigurableAxis axisEPAngle{"axisEPAngle", {6, -TMath::Pi() / 2, TMath::Pi() / 2}, "event plane angle"};
@@ -728,6 +757,11 @@ struct phipbpb {
               histos.fill(HIST("hSparseV2SameEventCosDeltaPhi"), PhiMesonMother.M(), PhiMesonMother.Pt(), v2, centrality);
               histos.fill(HIST("hSparseV2SameEventCos2DeltaPhi"), PhiMesonMother.M(), PhiMesonMother.Pt(), v2acc, centrality);
             }
+
+            histos.fill(HIST("hKaonpData"), centrality, KaonPlus.Pt(), KaonPlus.Eta(), GetPhiInRange(KaonPlus.Phi() - psiFT0C));
+            histos.fill(HIST("hKaonmData"), centrality, KaonMinus.Pt(), KaonMinus.Eta(), GetPhiInRange(KaonMinus.Phi() - psiFT0C));
+            fillHisoWithTGenPS(PhiMesonMother, psiFT0C, cfgCutPT, cfgCutEta, centrality);
+
             histos.fill(HIST("hSparseV2SameEventCosDeltaPhiSquare"), PhiMesonMother.M(), PhiMesonMother.Pt(), v2 * v2, centrality);
             histos.fill(HIST("hSparseV2SameEventCosDeltaPhiCube"), PhiMesonMother.M(), PhiMesonMother.Pt(), v2 * v2 * v2, centrality);
             histos.fill(HIST("hSparseV2SameEventSinDeltaPhi"), PhiMesonMother.M(), PhiMesonMother.Pt(), v2sin * QFT0C, centrality);
@@ -761,7 +795,7 @@ struct phipbpb {
       Npostrack = Npostrack + 1;
     }
   }
-  PROCESS_SWITCH(phipbpb, processSameEvent, "Process Same event", true);
+  PROCESS_SWITCH(phipbpb, processSameEvent, "Process Same event", false);
 
   void processSameEventv1(EventCandidatesv1::iterator const& collision, TrackCandidates const& /*tracks, aod::BCs const&*/, aod::BCsWithTimestamps const&)
   {
@@ -1014,7 +1048,7 @@ struct phipbpb {
       }
     }
   }
-  PROCESS_SWITCH(phipbpb, processMEAcc, "Process ME Acceptance", true);
+  PROCESS_SWITCH(phipbpb, processMEAcc, "Process ME Acceptance", false);
 
   void processMEAccv1(EventCandidatesv1 const& collisions, TrackCandidates const& tracks)
   {
@@ -1272,7 +1306,7 @@ struct phipbpb {
       }
     }
   }
-  PROCESS_SWITCH(phipbpb, processMixedEventOpti, "Process Mixed event new", true);
+  PROCESS_SWITCH(phipbpb, processMixedEventOpti, "Process Mixed event new", false);
 
   void processMixedEventOptiv1(EventCandidatesv1 const& collisions, TrackCandidates const& tracks)
   {
@@ -1846,6 +1880,47 @@ struct phipbpb {
 
   } // process MC
   PROCESS_SWITCH(phipbpb, processMCPhiWeight, "Process MC Phi Weight", false);
+
+  using McCollisionMults = soa::Join<aod::McCollisions, aod::MultMCExtras>;
+  using EventCandidatesMC = soa::Join<aod::Collisions, aod::EvSels, aod::McCollisionLabels, aod::CentFT0Ms, aod::CentFT0As, aod::CentFT0Cs, aod::CentFV0As, aod::Mults, aod::PVMults>;
+  void processEvtLossMC(McCollisionMults::iterator const& mcCollision, const soa::SmallGroups<EventCandidatesMC>& recCollisions)
+  {
+    auto impactPar = mcCollision.impactParameter();
+    histos.fill(HIST("hImpactParameterVsEvrStatusGen"), impactPar, 0.5);
+    if (mcCollision.isInelGt0()) {
+      histos.fill(HIST("hImpactParameterVsEvrStatusGen"), impactPar, 1.5);
+    }
+    auto numberRecCollision = recCollisions.size();
+    for (const auto& RecCollision : recCollisions) {
+      auto isTVX = RecCollision.selection_bit(o2::aod::evsel::kIsTriggerTVX);
+      auto vz = TMath::Abs(RecCollision.posZ());
+      auto issel8 = RecCollision.sel8();
+      auto isITSGoodLayer = RecCollision.selection_bit(o2::aod::evsel::kIsGoodITSLayersAll);
+      auto isGoodVtxzFT0vsPV = RecCollision.selection_bit(o2::aod::evsel::kIsGoodZvtxFT0vsPV);
+      auto isSameBunchPileup = RecCollision.selection_bit(o2::aod::evsel::kNoSameBunchPileup);
+      auto centrality = RecCollision.centFT0C();
+      histos.fill(HIST("hImpactParameterVsEvrStatusRec"), impactPar, centrality, 0.5);
+      histos.fill(HIST("hINumRecCollisionVsEvrStatusRec"), numberRecCollision, centrality, 0.5);
+      if (isTVX) {
+        histos.fill(HIST("hImpactParameterVsEvrStatusRec"), impactPar, centrality, 1.5);
+        histos.fill(HIST("hINumRecCollisionVsEvrStatusRec"), numberRecCollision, centrality, 1.5);
+      }
+      if (isTVX && vz < 7) {
+        histos.fill(HIST("hImpactParameterVsEvrStatusRec"), impactPar, centrality, 2.5);
+        histos.fill(HIST("hINumRecCollisionVsEvrStatusRec"), numberRecCollision, centrality, 2.5);
+      }
+      if (isTVX && vz < 7 && issel8) {
+        histos.fill(HIST("hImpactParameterVsEvrStatusRec"), impactPar, centrality, 3.5);
+        histos.fill(HIST("hINumRecCollisionVsEvrStatusRec"), numberRecCollision, centrality, 3.5);
+      }
+      if (isTVX && vz < 7 && issel8 && isITSGoodLayer && isGoodVtxzFT0vsPV && isSameBunchPileup) {
+        histos.fill(HIST("hImpactParameterVsEvrStatusRec"), impactPar, centrality, 4.5);
+        histos.fill(HIST("hINumRecCollisionVsEvrStatusRec"), numberRecCollision, centrality, 4.5);
+      }
+    }
+    //}
+  }
+  PROCESS_SWITCH(phipbpb, processEvtLossMC, "Process to calculate Event Loss", true);
 };
 WorkflowSpec defineDataProcessing(ConfigContext const& cfgc)
 {

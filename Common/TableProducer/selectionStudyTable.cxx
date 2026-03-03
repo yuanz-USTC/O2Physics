@@ -17,17 +17,14 @@
 
 #include "Common/DataModel/SelectionStudyTables.h"
 
-#include "Framework/ASoAHelpers.h"
-#include "Framework/AnalysisDataModel.h"
-#include "Framework/AnalysisTask.h"
-#include "Framework/ConfigParamSpec.h"
-#include "Framework/HistogramRegistry.h"
-#include "Framework/O2DatabasePDGPlugin.h"
-#include "Framework/runDataProcessing.h"
+#include <Framework/AnalysisDataModel.h>
+#include <Framework/AnalysisHelpers.h>
+#include <Framework/AnalysisTask.h>
+#include <Framework/InitContext.h>
+#include <Framework/runDataProcessing.h>
 
-#include <algorithm>
-#include <map>
-#include <string>
+#include <cmath>
+#include <cstdlib>
 #include <vector>
 
 using namespace o2;
@@ -104,9 +101,6 @@ struct SelectionStudyTable {
       }
       if (std::abs(mcPart.pdgCode()) == 3312) {
         ptxi.push_back(mcPart.pt());
-      }
-      if (std::abs(mcPart.pdgCode()) == 3334) {
-        ptom.push_back(mcPart.pt());
       }
       if (std::abs(mcPart.pdgCode()) == 3334) {
         ptom.push_back(mcPart.pt());

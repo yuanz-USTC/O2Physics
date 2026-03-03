@@ -28,3 +28,13 @@ o2physics_add_dpl_workflow(flattenicty-pikp
                     SOURCES flattenictyPikp.cxx
                     PUBLIC_LINK_LIBRARIES O2::Framework O2Physics::AnalysisCore O2Physics::AnalysisCCDB
                     COMPONENT_NAME Analysis)
+
+o2physics_add_dpl_workflow(study-pnch
+    SOURCES studyPnch.cxx
+    PUBLIC_LINK_LIBRARIES O2Physics::AnalysisCore
+    COMPONENT_NAME Analysis)
+
+o2physics_add_dpl_workflow(ptmult-corr
+    SOURCES ptmultCorr.cxx
+    PUBLIC_LINK_LIBRARIES O2Physics::AnalysisCore
+    COMPONENT_NAME Analysis)

@@ -16,28 +16,41 @@
 ///         In MC the efficiency for particles is computed according to the PDG code (sign included and not charge).
 ///
 
-// O2 includes
-#include <memory>
-#include <vector>
+#include "PWGLF/DataModel/LFParticleIdentification.h"
 
-#include "Framework/AnalysisTask.h"
-#include "Framework/runDataProcessing.h"
-#include "Framework/HistogramRegistry.h"
-#include "Framework/StaticFor.h"
-#include "ReconstructionDataFormats/DCA.h"
-#include "ReconstructionDataFormats/Track.h"
+#include "Common/CCDB/EventSelectionParams.h"
+#include "Common/Core/RecoDecay.h"
 #include "Common/Core/TrackSelection.h"
+#include "Common/Core/TrackSelectionDefaults.h"
 #include "Common/DataModel/Centrality.h"
 #include "Common/DataModel/EventSelection.h"
-#include "Common/Core/TrackSelectionDefaults.h"
 #include "Common/DataModel/TrackSelectionTables.h"
-#include "PWGLF/DataModel/LFParticleIdentification.h"
-#include "Common/Core/RecoDecay.h"
 
-// ROOT includes
-#include "TPDGCode.h"
-#include "TEfficiency.h"
-#include "THashList.h"
+#include <Framework/ASoA.h>
+#include <Framework/AnalysisDataModel.h>
+#include <Framework/AnalysisHelpers.h>
+#include <Framework/AnalysisTask.h>
+#include <Framework/Configurable.h>
+#include <Framework/DataTypes.h>
+#include <Framework/HistogramRegistry.h>
+#include <Framework/HistogramSpec.h>
+#include <Framework/InitContext.h>
+#include <Framework/OutputObjHeader.h>
+#include <Framework/SliceCache.h>
+#include <Framework/StaticFor.h>
+#include <Framework/runDataProcessing.h>
+#include <ReconstructionDataFormats/PID.h>
+
+#include <TAxis.h>
+#include <TEfficiency.h>
+#include <THashList.h>
+#include <TMathBase.h>
+#include <TString.h>
+
+#include <array>
+#include <cmath>
+#include <memory>
+#include <vector>
 
 using namespace o2;
 using namespace o2::framework;
@@ -263,6 +276,7 @@ struct QaEfficiency {
 
   using CollisionCandidates = o2::soa::Join<o2::aod::Collisions, o2::aod::EvSels, aod::CentFT0Cs>;
   using CollisionCandidatesMC = o2::soa::Join<CollisionCandidates, o2::aod::McCollisionLabels>;
+  using CollisionsWithMcLabels = o2::soa::Join<o2::aod::Collisions, o2::aod::McCollisionLabels>;
   using TrackCandidates = o2::soa::Join<o2::aod::Tracks, o2::aod::TracksExtra, o2::aod::TrackSelection, o2::aod::TrackSelectionExtension, o2::aod::TracksDCA>;
   using TrackCandidatesMC = o2::soa::Join<TrackCandidates, o2::aod::McTrackLabels>;
   using BCsInfo = soa::Join<aod::BCs, aod::Timestamps, aod::BcSels>;
@@ -581,6 +595,10 @@ struct QaEfficiency {
     }
     if (doprocessMC && doprocessMCWithoutCollisions) {
       LOG(fatal) << "Both processMC and processMCWithoutCollisions are set to true. Please set only one of them to true.";
+    }
+
+    if (numSameCollision && doprocessMCWithoutCollisions) {
+      LOG(fatal) << "Inconsistent configuration for process without MC collisions, but numSameCollision set to true. Please fix your configuration.";
     }
 
     auto h = histos.add<TH1>("MC/trackSelection", "Track Selection", kTH1D, {axisSel});
@@ -1041,7 +1059,7 @@ struct QaEfficiency {
     }
     return false; // Otherwise, not considered a tertiary particle
   }
-  template <int pdgSign, o2::track::PID::ID id>
+  template <int pdgSign, o2::track::PID::ID id, typename Colls>
   void fillMCTrackHistograms(const TrackCandidatesMC::iterator& track, const bool doMakeHistograms)
   {
     static_assert(pdgSign == 0 || pdgSign == 1);
@@ -1060,10 +1078,10 @@ struct QaEfficiency {
     }
     constexpr int histogramIndex = id + pdgSign * nSpecies;
     LOG(debug) << "fillMCTrackHistograms for pdgSign '" << pdgSign << "' and id '" << static_cast<int>(id) << "' " << particleName(pdgSign, id) << " with index " << histogramIndex;
-    const o2::aod::McParticles::iterator& mcParticle = track.mcParticle();
-    const CollisionCandidatesMC::iterator& collision = track.collision_as<CollisionCandidatesMC>();
+    auto const& mcParticle = track.mcParticle();
     float radius = std::sqrt(mcParticle.vx() * mcParticle.vx() + mcParticle.vy() * mcParticle.vy());
     if (numSameCollision) {
+      auto const& collision = track.collision_as<Colls>();
       if (!collision.has_mcCollision()) {
         return;
       }
@@ -1859,15 +1877,15 @@ struct QaEfficiency {
           // Filling variable histograms
           histos.fill(HIST("MC/trackLength"), track.length());
           static_for<0, 1>([&](auto pdgSign) {
-            fillMCTrackHistograms<pdgSign, o2::track::PID::Electron>(track, doEl);
-            fillMCTrackHistograms<pdgSign, o2::track::PID::Muon>(track, doMu);
-            fillMCTrackHistograms<pdgSign, o2::track::PID::Pion>(track, doPi);
-            fillMCTrackHistograms<pdgSign, o2::track::PID::Kaon>(track, doKa);
-            fillMCTrackHistograms<pdgSign, o2::track::PID::Proton>(track, doPr);
-            fillMCTrackHistograms<pdgSign, o2::track::PID::Deuteron>(track, doDe);
-            fillMCTrackHistograms<pdgSign, o2::track::PID::Triton>(track, doTr);
-            fillMCTrackHistograms<pdgSign, o2::track::PID::Helium3>(track, doHe);
-            fillMCTrackHistograms<pdgSign, o2::track::PID::Alpha>(track, doAl);
+            fillMCTrackHistograms<pdgSign, o2::track::PID::Electron, CollisionCandidatesMC>(track, doEl);
+            fillMCTrackHistograms<pdgSign, o2::track::PID::Muon, CollisionCandidatesMC>(track, doMu);
+            fillMCTrackHistograms<pdgSign, o2::track::PID::Pion, CollisionCandidatesMC>(track, doPi);
+            fillMCTrackHistograms<pdgSign, o2::track::PID::Kaon, CollisionCandidatesMC>(track, doKa);
+            fillMCTrackHistograms<pdgSign, o2::track::PID::Proton, CollisionCandidatesMC>(track, doPr);
+            fillMCTrackHistograms<pdgSign, o2::track::PID::Deuteron, CollisionCandidatesMC>(track, doDe);
+            fillMCTrackHistograms<pdgSign, o2::track::PID::Triton, CollisionCandidatesMC>(track, doTr);
+            fillMCTrackHistograms<pdgSign, o2::track::PID::Helium3, CollisionCandidatesMC>(track, doHe);
+            fillMCTrackHistograms<pdgSign, o2::track::PID::Alpha, CollisionCandidatesMC>(track, doAl);
           });
         }
 
@@ -1998,7 +2016,7 @@ struct QaEfficiency {
   //  - considering also tracks not associated to any collision
   //  - ignoring the track-to-collision association
   void processMCWithoutCollisions(TrackCandidatesMC const& tracks,
-                                  o2::aod::Collisions const&,
+                                  CollisionsWithMcLabels const&,
                                   o2::aod::McParticles const& mcParticles,
                                   o2::aod::McCollisions const&,
                                   BCsInfo const&)
@@ -2011,7 +2029,7 @@ struct QaEfficiency {
 
       /// checking the PV z coordinate, if the track has been assigned to any collision
       if (applyPvZCutInProcessMcWoColl && track.has_collision()) {
-        const auto collision = track.collision();
+        const auto collision = track.collision_as<CollisionsWithMcLabels>();
         const float posZ = collision.posZ();
         if (posZ < vertexZMin || posZ > vertexZMax) {
           continue;
@@ -2028,15 +2046,15 @@ struct QaEfficiency {
       // Filling variable histograms
       histos.fill(HIST("MC/trackLength"), track.length());
       static_for<0, 1>([&](auto pdgSign) {
-        fillMCTrackHistograms<pdgSign, o2::track::PID::Electron>(track, doEl);
-        fillMCTrackHistograms<pdgSign, o2::track::PID::Muon>(track, doMu);
-        fillMCTrackHistograms<pdgSign, o2::track::PID::Pion>(track, doPi);
-        fillMCTrackHistograms<pdgSign, o2::track::PID::Kaon>(track, doKa);
-        fillMCTrackHistograms<pdgSign, o2::track::PID::Proton>(track, doPr);
-        fillMCTrackHistograms<pdgSign, o2::track::PID::Deuteron>(track, doDe);
-        fillMCTrackHistograms<pdgSign, o2::track::PID::Triton>(track, doTr);
-        fillMCTrackHistograms<pdgSign, o2::track::PID::Helium3>(track, doHe);
-        fillMCTrackHistograms<pdgSign, o2::track::PID::Alpha>(track, doAl);
+        fillMCTrackHistograms<pdgSign, o2::track::PID::Electron, CollisionsWithMcLabels>(track, doEl);
+        fillMCTrackHistograms<pdgSign, o2::track::PID::Muon, CollisionsWithMcLabels>(track, doMu);
+        fillMCTrackHistograms<pdgSign, o2::track::PID::Pion, CollisionsWithMcLabels>(track, doPi);
+        fillMCTrackHistograms<pdgSign, o2::track::PID::Kaon, CollisionsWithMcLabels>(track, doKa);
+        fillMCTrackHistograms<pdgSign, o2::track::PID::Proton, CollisionsWithMcLabels>(track, doPr);
+        fillMCTrackHistograms<pdgSign, o2::track::PID::Deuteron, CollisionsWithMcLabels>(track, doDe);
+        fillMCTrackHistograms<pdgSign, o2::track::PID::Triton, CollisionsWithMcLabels>(track, doTr);
+        fillMCTrackHistograms<pdgSign, o2::track::PID::Helium3, CollisionsWithMcLabels>(track, doHe);
+        fillMCTrackHistograms<pdgSign, o2::track::PID::Alpha, CollisionsWithMcLabels>(track, doAl);
       });
     }
 

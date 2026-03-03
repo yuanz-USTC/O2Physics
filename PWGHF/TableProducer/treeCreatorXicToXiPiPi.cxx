@@ -16,6 +16,7 @@
 /// \author Carolina Reetz <c.reetz@cern.ch>, Heidelberg University
 /// \author Jaeyoon Cho <jaeyoon.cho@cern.ch>, Inha University
 
+#include "PWGHF/Core/DecayChannelsLegacy.h"
 #include "PWGHF/DataModel/CandidateReconstructionTables.h"
 #include "PWGHF/DataModel/CandidateSelectionTables.h"
 
@@ -81,7 +82,7 @@ DECLARE_SOA_COLUMN(MaxNormalisedDeltaIP, maxNormalisedDeltaIP, float);          
 
 DECLARE_SOA_TABLE(HfCandXicToXiPiPiLites, "AOD", "HFXICXI2PILITE",
                   full::ParticleFlag,
-                  hf_cand_xic_to_xi_pi_pi::OriginRec,
+                  hf_cand_xic_to_xi_pi_pi::OriginMcRec,
                   full::CandidateSelFlag,
                   full::Y,
                   full::Eta,
@@ -118,7 +119,7 @@ DECLARE_SOA_TABLE(HfCandXicToXiPiPiLites, "AOD", "HFXICXI2PILITE",
 
 DECLARE_SOA_TABLE(HfCandXicToXiPiPiLiteKfs, "AOD", "HFXICXI2PILITKF",
                   full::ParticleFlag,
-                  hf_cand_xic_to_xi_pi_pi::OriginRec,
+                  hf_cand_xic_to_xi_pi_pi::OriginMcRec,
                   full::CandidateSelFlag,
                   full::Y,
                   full::Eta,
@@ -187,7 +188,7 @@ DECLARE_SOA_TABLE(HfCandXicToXiPiPiLiteKfs, "AOD", "HFXICXI2PILITKF",
 
 DECLARE_SOA_TABLE(HfCandXicToXiPiPiFulls, "AOD", "HFXICXI2PIFULL",
                   full::ParticleFlag,
-                  hf_cand_xic_to_xi_pi_pi::OriginRec,
+                  hf_cand_xic_to_xi_pi_pi::OriginMcRec,
                   full::CandidateSelFlag,
                   full::Y,
                   full::Eta,
@@ -249,7 +250,7 @@ DECLARE_SOA_TABLE(HfCandXicToXiPiPiFulls, "AOD", "HFXICXI2PIFULL",
 
 DECLARE_SOA_TABLE(HfCandXicToXiPiPiFullKfs, "AOD", "HFXICXI2PIFULKF",
                   full::ParticleFlag,
-                  hf_cand_xic_to_xi_pi_pi::OriginRec,
+                  hf_cand_xic_to_xi_pi_pi::OriginMcRec,
                   full::CandidateSelFlag,
                   full::Y,
                   full::Eta,
@@ -329,12 +330,13 @@ DECLARE_SOA_TABLE(HfCandXicToXiPiPiFullKfs, "AOD", "HFXICXI2PIFULKF",
 
 DECLARE_SOA_TABLE(HfCandXicToXiPiPiFullPs, "AOD", "HFXICXI2PIFULLP",
                   hf_cand_xic_to_xi_pi_pi::FlagMcMatchGen,
-                  hf_cand_xic_to_xi_pi_pi::OriginGen,
+                  hf_cand_xic_to_xi_pi_pi::OriginMcGen,
                   hf_cand::PdgBhadMotherPart,
                   full::Pt,
                   full::Eta,
                   full::Phi,
-                  full::Y);
+                  full::Y,
+                  hf_cand_xic_to_xi_pi_pi::DecayLengthMcGen);
 } // namespace o2::aod
 
 /// Writes the full information in an output TTree
@@ -372,16 +374,16 @@ struct HfTreeCreatorXicToXiPiPi {
   {
   }
 
-  template <bool doMc, bool doKf, typename T>
+  template <bool DoMc, bool DoKf, typename T>
   void fillCandidateTable(const T& candidate)
   {
     int8_t particleFlag = candidate.sign();
     int8_t originMc = 0;
-    if constexpr (doMc) {
+    if constexpr (DoMc) {
       particleFlag = candidate.flagMcMatchRec();
-      originMc = candidate.originRec();
+      originMc = candidate.originMcRec();
     }
-    if constexpr (!doKf) {
+    if constexpr (!DoKf) {
       if (fillCandidateLiteTable) {
         rowCandidateLite(
           particleFlag,
@@ -646,7 +648,7 @@ struct HfTreeCreatorXicToXiPiPi {
     }
     for (const auto& candidate : candidates) {
       if (fillOnlyBackground && downSampleBkgFactor < 1.) {
-        float pseudoRndm = candidate.ptProng1() * 1000. - static_cast<int64_t>(candidate.ptProng1() * 1000);
+        float const pseudoRndm = candidate.ptProng1() * 1000. - static_cast<int64_t>(candidate.ptProng1() * 1000);
         if (pseudoRndm >= downSampleBkgFactor && candidate.pt() < ptMaxForDownSample) {
           continue;
         }
@@ -666,7 +668,7 @@ struct HfTreeCreatorXicToXiPiPi {
     }
     for (const auto& candidate : candidates) {
       if (fillOnlyBackground && downSampleBkgFactor < 1.) {
-        float pseudoRndm = candidate.ptProng1() * 1000. - static_cast<int64_t>(candidate.ptProng1() * 1000);
+        float const pseudoRndm = candidate.ptProng1() * 1000. - static_cast<int64_t>(candidate.ptProng1() * 1000);
         if (pseudoRndm >= downSampleBkgFactor && candidate.pt() < ptMaxForDownSample) {
           continue;
         }
@@ -696,7 +698,7 @@ struct HfTreeCreatorXicToXiPiPi {
         rowCandidateFull.reserve(recBg.size());
       }
       for (const auto& candidate : recBg) {
-        float pseudoRndm = candidate.ptProng1() * 1000. - static_cast<int64_t>(candidate.ptProng1() * 1000);
+        float const pseudoRndm = candidate.ptProng1() * 1000. - static_cast<int64_t>(candidate.ptProng1() * 1000);
         if (candidate.pt() < ptMaxForDownSample && pseudoRndm >= downSampleBkgFactor) {
           continue;
         }
@@ -718,12 +720,13 @@ struct HfTreeCreatorXicToXiPiPi {
       for (const auto& particle : particles) {
         rowCandidateFullParticles(
           particle.flagMcMatchGen(),
-          particle.originGen(),
+          particle.originMcGen(),
           particle.pdgBhadMotherPart(),
           particle.pt(),
           particle.eta(),
           particle.phi(),
-          RecoDecay::y(particle.pVector(), o2::constants::physics::MassXiCPlus));
+          RecoDecay::y(particle.pVector(), o2::constants::physics::MassXiCPlus),
+          particle.decayLengthMcGen());
       }
     }
   }
@@ -749,7 +752,7 @@ struct HfTreeCreatorXicToXiPiPi {
         rowCandidateFull.reserve(recBgKf.size());
       }
       for (const auto& candidate : recBgKf) {
-        float pseudoRndm = candidate.ptProng1() * 1000. - static_cast<int64_t>(candidate.ptProng1() * 1000);
+        float const pseudoRndm = candidate.ptProng1() * 1000. - static_cast<int64_t>(candidate.ptProng1() * 1000);
         if (candidate.pt() < ptMaxForDownSample && pseudoRndm >= downSampleBkgFactor) {
           continue;
         }
@@ -771,12 +774,13 @@ struct HfTreeCreatorXicToXiPiPi {
       for (const auto& particle : particles) {
         rowCandidateFullParticles(
           particle.flagMcMatchGen(),
-          particle.originGen(),
+          particle.originMcGen(),
           particle.pdgBhadMotherPart(),
           particle.pt(),
           particle.eta(),
           particle.phi(),
-          RecoDecay::y(particle.pVector(), o2::constants::physics::MassXiCPlus));
+          RecoDecay::y(particle.pVector(), o2::constants::physics::MassXiCPlus),
+          particle.decayLengthMcGen());
       }
     }
   }
